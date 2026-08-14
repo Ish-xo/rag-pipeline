@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pydantic
+instructor
+elevenlabs
+sarvam
+langchain
+langchain-community
+sentence-transformers
+chromadb
+python-dotenv
+numpy
+pandas
