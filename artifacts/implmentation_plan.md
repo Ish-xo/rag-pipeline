@@ -37,21 +37,21 @@ The architecture is strictly decoupled using modular contracts (`base.py`, Pydan
 ## Phase 0: Setup & Account Verification (All Members)
 
 ### 0.1 Project Scaffolding
-- [ ] Initialize repository structure with modular components (see directory layout below)
-- [ ] Configure `.env` from template with verified API keys
-- [ ] Pin exact dependencies in `requirements.txt`
-- [ ] Run `scripts/test_providers.py` to verify network and credentials for all active APIs
+- [x] Initialize repository structure with modular components (see directory layout below)
+- [x] Configure `.env` from template with verified API keys
+- [x] Pin exact dependencies in `requirements.txt`
+- [x] Run `scripts/test_providers.py` to verify network and credentials for all active APIs
 
 ### 0.2 Account & Key Checklist
-- [ ] Sarvam AI (`SARVAM_API_KEY`)
-- [ ] ElevenLabs (`ELEVENLABS_API_KEY`)
-- [ ] Groq (`GROQ_API_KEY`)
-- [ ] Cerebras (`CEREBRAS_API_KEY`)
-- [ ] Google AI Studio (`GOOGLE_API_KEY`)
-- [ ] Voyage AI (`VOYAGE_API_KEY`)
-- [ ] Qdrant Cloud (`QDRANT_URL`, `QDRANT_API_KEY`)
-- [ ] Pinecone (`PINECONE_API_KEY`, `PINECONE_INDEX_HOST`)
-- [ ] Hugging Face (`HF_TOKEN`)
+- [x] Sarvam AI (`SARVAM_API_KEY`)
+- [x] ElevenLabs (`ELEVENLABS_API_KEY`)
+- [x] Groq (`GROQ_API_KEY`)
+- [x] Cerebras (`CEREBRAS_API_KEY`)
+- [x] Google AI Studio (`GOOGLE_API_KEY`)
+- [x] Voyage AI (`VOYAGE_API_KEY`)
+- [x] Qdrant Cloud (`QDRANT_URL`, `QDRANT_API_KEY`)
+- [x] Pinecone (`PINECONE_API_KEY`, `PINECONE_INDEX_HOST`)
+- [x] Hugging Face (`HF_TOKEN`)
 
 ---
 
