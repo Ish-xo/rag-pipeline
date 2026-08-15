@@ -1,13 +1,30 @@
-fastapi
-uvicorn
-pydantic
-instructor
-elevenlabs
-sarvam
-langchain
-langchain-community
-sentence-transformers
-chromadb
-python-dotenv
-numpy
-pandas
+# Web & UI
+fastapi>=0.111.0
+uvicorn>=0.30.0
+gradio>=4.38.0
+python-dotenv>=1.0.0
+
+# LLM Providers & Core RAG
+groq>=0.9.0
+cerebras_cloud_sdk>=1.0.0
+google-genai>=0.1.0
+instructor>=1.3.0
+pydantic>=2.7.0
+openai>=1.35.0  # Used by Together/SambaNova/OpenRouter if needed
+
+# Vector DBs & Embeddings
+qdrant-client>=1.9.0
+pinecone-client>=4.1.0
+voyageai>=0.3.0
+
+# Voice I/O (STT / TTS)
+elevenlabs>=1.4.0
+edge-tts>=6.1.12
+httpx>=0.27.0
+pydub>=0.25.1
+soundfile>=0.12.1
+
+# Data Processing
+datasets>=2.20.0
+pandas>=2.2.2
+numpy>=1.26.4
