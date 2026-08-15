@@ -39,11 +39,22 @@
   - Auto language detection when `language_code` omitted
 - **Auth**: `api-subscription-key` header
 
-### Why Sarvam?
-- Task explicitly recommends Sarvam or ElevenLabs
-- Sarvam has native Indic language support, better for Hindi
-- Auto language detection means we don't need user to specify language
-- `translate` mode gives us English text from Hindi speech (helps retrieval)
+### Backup: ElevenLabs Scribe (`scribe_v2`)
+- **Endpoint**: `POST https://api.elevenlabs.io/v1/speech-to-text`
+- **Free Tier**: 10,000 credits/month (shared with TTS)
+- **Concurrency**: 8 concurrent requests on free tier
+- **Languages**: 90+ languages including Hindi + 10 Indic languages
+- **Features**:
+  - Speaker diarization (up to 32 speakers)
+  - Word-level timestamps
+  - Audio event tagging (laughter, applause, etc.)
+  - Code-switching support (Hinglish)
+- **Auth**: `xi-api-key` header
+
+### STT Failover Logic
+1. Try Sarvam first (native Indic support, better Hindi quality)
+2. If Sarvam fails / rate-limited → fallback to ElevenLabs Scribe
+3. If both fail → prompt user for text input
 
 ---
 
@@ -104,31 +115,34 @@ The MSMARCO-XI dataset is **pre-chunked into passages** (~10 passages per query)
 
 ## 3. Embedding
 
-### Primary: Voyage AI `voyage-multilingual-2`
+### Primary: Voyage AI `voyage-3`
 - **Dimensions**: 1024
-- **Free Quota**: 50M tokens on signup
-- **Context Window**: 4,000 tokens
+- **Free Quota**: 200M tokens on signup
+- **Context Window**: 32,000 tokens
 - **Rate Limit**: 2,000 RPM
-- **Strengths**: State-of-the-art on multilingual MTEB benchmarks, excellent for Indic languages
-- **Usage**: Batch embed all passages during ingestion
+- **Strengths**: State-of-the-art multilingual retrieval quality, excellent for Indic languages, massive free quota
+- **Usage**: Batch embed all passages during ingestion + query-time embedding
 
-### Backup 1: Google Gemini `text-embedding-004`
+### Backup 1: Google Gemini `gemini-embedding-001`
 - **Dimensions**: 768
 - **Free Quota**: Unlimited (free tier)
 - **Rate Limit**: 1,500 RPM
 - **Strengths**: No monthly token cap, very high RPM
-- **Usage**: Fallback if Voyage quota exhausted, also used for query-time embeddings
+- **Usage**: Fallback if Voyage quota exhausted
 
-### Backup 2: Jina AI `jina-embeddings-v3`
+> ⚠️ **Note**: `text-embedding-004` was deprecated and shut down on Jan 14, 2026. Use `gemini-embedding-001` instead.
+
+### Backup 2: Jina AI `jina-embeddings-v4`
 - **Dimensions**: 1024 (Matryoshka to 256-768)
+- **Context Window**: 32,000 tokens
 - **Free Quota**: 10M tokens on signup
 - **Rate Limit**: 100 RPM
-- **Strengths**: Task-specific LoRA adapters (`retrieval.query` vs `retrieval.passage`)
+- **Strengths**: Multimodal text/image model, 3.8B parameters
 
 ### Embedding Strategy
-- **Index-time**: Use Voyage AI for all passage embeddings (highest quality)
-- **Query-time**: Use Gemini `text-embedding-004` (unlimited, fast) with fallback to Voyage
-- **Dimensionality**: 1024d for Voyage, 768d for Gemini (separate collections or unified with padding)
+- **Index-time**: Use Voyage AI `voyage-3` for all passage embeddings (highest quality, 200M free tokens is more than enough)
+- **Query-time**: Also use Voyage AI (same embedding space for consistency), fallback to Gemini
+- **Dimensionality**: 1024d for Voyage, 768d for Gemini (separate collections if needed)
 
 > **Important**: We index **English passages** for embedding (better multilingual embedding quality). Translated text is stored as metadata payload for answer generation.
 
@@ -151,12 +165,13 @@ The MSMARCO-XI dataset is **pre-chunked into passages** (~10 passages per query)
 - **Storage**: 2 GB
 - **Capacity**: ~250K-300K vectors at 1024d
 - **Rate Limits**: 2M write units/mo, 1M read units/mo
+- **Region**: AWS us-east-1 only
 - **Usage**: Activated if Qdrant goes down or approaches limits
 
 ### Collection Design
 ```
 Collection: ultron_passages
-├── Vectors: 1024d (Voyage) or 768d (Gemini)
+├── Vectors: 1024d (Voyage)
 ├── Distance: Cosine
 ├── Quantization: Scalar (int8)
 └── Payload Fields:
@@ -188,16 +203,18 @@ The task demands **<200ms** for "chunking + vector DB retrieval + everything thr
 - **LLM generation**: Even the fastest APIs (Groq) take 300-1000ms for a complete answer
 - **Strategy**: Use **streaming** to deliver first tokens within 200ms. Report P50/P70/P100 for both Time-to-First-Token (TTFT) and total completion time.
 
-### Provider Cascade (5 backups for resilience)
+### Provider Cascade (6 providers for resilience)
 
-| Priority | Provider | Model | Latency (TTFT) | RPM | RPD | Why |
-|----------|----------|-------|-----------------|-----|-----|-----|
-| 1 | **Groq** | `llama-3.3-70b-versatile` | ~100-200ms | 30 | 1,000 | Fastest inference (LPU), best for latency target |
-| 2 | **Cerebras** | `llama-3.3-70b` | ~100-300ms | 30 | ~1M tokens/day | Ultra-fast, generous daily quota |
-| 3 | **SambaNova** | `Meta-Llama-3.3-70B-Instruct` | ~200-500ms | 240 | 48,000 | Highest RPM, very generous limits |
-| 4 | **Google Gemini** | `gemini-2.0-flash` | ~200-500ms | 15 | 1,500 | 1M context, structured output, reliable |
-| 5 | **Together AI** | `Llama-3.3-70B-Instruct-Turbo-Free` | ~300-700ms | 60 | dynamic | Good fallback with $5 initial credit |
-| 6 | **OpenRouter** | `:free` models (auto-route) | ~500ms+ | 20 | 50 | Last-resort fallback |
+| Priority | Provider | Model | Latency (TTFT) | RPM | Free Limits | Why |
+|----------|----------|-------|-----------------|-----|-------------|-----|
+| 1 | **Groq** | `llama-3.3-70b-versatile` | ~100-200ms | 30 | 14.4K RPD | Fastest inference (LPU), best for latency |
+| 2 | **Cerebras** | `llama-3.3-70b` | ~100-300ms | 30 | 1M tokens/day | Ultra-fast, generous daily quota |
+| 3 | **SambaNova** | `Meta-Llama-3.3-70B-Instruct` | ~200-500ms | 240 | 48K RPD, 20M TPD | Highest RPM, most generous limits |
+| 4 | **Google Gemini** | `gemini-2.5-flash` | ~200-500ms | 15 | 1,500 RPD | 1M context, structured output, reliable |
+| 5 | **Together AI** | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | ~300-700ms | 60 | $5 credit | Good fallback |
+| 6 | **OpenRouter** | `deepseek/deepseek-r1:free` | ~500ms+ | 20 | 50 RPD | Last-resort fallback |
+
+> **Note on Llama 4 / Gemini 3.7**: While newer models like `llama-4-scout`, `gemini-3.7-flash`, and `qwen-qwq-32b` are available on some providers, we use **Llama 3.3 70B** as the primary across providers for consistency — it's the most widely available, well-tested, and reliably fast model on all 6 platforms. We can upgrade per-provider if a newer model proves faster/better during testing.
 
 ### Failover Logic
 ```python
@@ -212,7 +229,7 @@ raise AllProvidersExhaustedError()
 ```
 
 ### LLM Interface (OpenAI-compatible)
-All providers except Gemini support OpenAI-compatible API format. Use `litellm` or `openai` SDK with provider-specific base URLs. For Gemini, use `google-genai` SDK or adapt via OpenAI compatibility endpoint.
+All providers support OpenAI-compatible API format. Use `litellm` or `openai` SDK with provider-specific base URLs. For Gemini, use `google-genai` SDK or its OpenAI compatibility endpoint.
 
 ---
 
@@ -322,7 +339,7 @@ class GuardrailResult(BaseModel):
 - **Max per request**: 2,500 characters
 
 ### Tertiary: ElevenLabs (Multilingual v3)
-- **Free Tier**: 10,000 characters/month
+- **Free Tier**: 10,000 credits/month (shared with STT Scribe)
 - **Languages**: Hindi, Bengali, Tamil, Telugu + 70 more
 - **Quality**: Best emotional expressiveness
 - **Limitation**: Very small free quota, save for demos
@@ -378,10 +395,14 @@ Metrics:
 - **Always-on**: Yes (no cold starts)
 - **Secrets**: Store API keys as HF Space secrets
 
+### No Local Dataset Needed for Deployment
+The deployment does **not** require the MSMARCO-XI dataset. All passages are pre-embedded and stored in the vector database (Qdrant/Pinecone). The deployed app only needs API keys to access external services.
+
 ### Environment Variables
 ```env
 # STT
 SARVAM_API_KEY=xxx
+ELEVENLABS_API_KEY=xxx
 
 # LLM Providers
 GROQ_API_KEY=xxx
@@ -400,9 +421,6 @@ QDRANT_URL=xxx
 QDRANT_API_KEY=xxx
 PINECONE_API_KEY=xxx
 PINECONE_INDEX_HOST=xxx
-
-# TTS
-ELEVENLABS_API_KEY=xxx
 ```
 
 ---
@@ -413,11 +431,11 @@ ELEVENLABS_API_KEY=xxx
 |-----------|-----------|-----------|
 | **Language** | Python 3.11+ | — |
 | **Framework** | FastAPI (backend logic) + Gradio (UI) | — |
-| **STT** | Sarvam AI `saaras:v3` | ₹100 credits (~200 min) |
-| **Embedding** | Voyage AI `voyage-multilingual-2` + Gemini backup | 50M tokens + unlimited |
+| **STT** | Sarvam AI `saaras:v3` + ElevenLabs `scribe_v2` backup | ₹100 credits + 10K credits |
+| **Embedding** | Voyage AI `voyage-3` + Gemini `gemini-embedding-001` backup | 200M tokens + unlimited |
 | **Vector DB** | Qdrant Cloud + Pinecone backup | 4GB + 2GB |
 | **LLM** | Groq → Cerebras → SambaNova → Gemini → Together → OpenRouter | All free |
-| **TTS** | `edge-tts` + Sarvam + ElevenLabs | Unlimited + ₹100 + 10K chars |
+| **TTS** | `edge-tts` + Sarvam + ElevenLabs | Unlimited + ₹100 + 10K credits |
 | **Deployment** | Hugging Face Spaces | Free |
 | **Orchestration** | LiteLLM (provider routing) + Instructor (structured output) | — |
 | **Guardrails** | Custom (Pydantic validation + LLM-based checks) | — |

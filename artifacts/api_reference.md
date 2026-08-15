@@ -1,12 +1,13 @@
 # ULTRON-V — API Reference & Provider Details
 
 > All providers are free tier. No credit card required for any service.
+> Last verified: August 15, 2026.
 
 ---
 
 ## 1. Speech-to-Text (STT)
 
-### Sarvam AI STT
+### 1.1 Sarvam AI STT (PRIMARY)
 
 | Detail | Value |
 |--------|-------|
@@ -43,6 +44,41 @@
 | `translate` | Indic speech → English text | Cross-lingual retrieval |
 | `codemix` | Mixed language (Hinglish) | Code-switching users |
 
+### 1.2 ElevenLabs Scribe STT (BACKUP)
+
+| Detail | Value |
+|--------|-------|
+| **Endpoint** | `POST https://api.elevenlabs.io/v1/speech-to-text` |
+| **Model** | `scribe_v2` |
+| **Auth** | `xi-api-key` header |
+| **Free Tier** | 10,000 credits/month (shared with TTS) |
+| **Max File Size** | 5.0 GB |
+| **Min Audio** | 100ms |
+| **Languages** | 90+ languages including Hindi + 10 Indic languages |
+| **Request Format** | `multipart/form-data` |
+| **SDK** | `pip install elevenlabs` |
+| **Signup** | https://elevenlabs.io |
+| **Concurrency** | 8 concurrent requests (free tier) |
+
+**Request Fields:**
+- `file` (binary): Audio/video file
+- `model_id` (string, required): `scribe_v2`
+- `language_code` (string, optional): ISO-639 code e.g. `hi`, `en`
+- `diarize` (bool, optional): Speaker separation
+- `tag_audio_events` (bool, optional): Tag laughter, applause, etc.
+- `timestamps_granularity` (string, optional): `word` or `character`
+
+**Response:**
+```json
+{
+  "text": "नमस्ते, आप कैसे हैं?",
+  "words": [
+    {"text": "नमस्ते", "start": 0.12, "end": 0.55, "speaker_id": "speaker_0"}
+  ],
+  "language_code": "hi"
+}
+```
+
 ---
 
 ## 2. LLM Providers
@@ -52,24 +88,24 @@
 | Detail | Value |
 |--------|-------|
 | **Base URL** | `https://api.groq.com/openai/v1` |
-| **Model** | `llama-3.3-70b-versatile` |
-| **Context Window** | 128,000 tokens |
-| **Max Completion** | 32,768 tokens |
-| **Rate Limit** | 30 RPM, 12K-30K TPM, 1,000 RPD |
+| **Model** | `llama-4-scout-17b-16e-instruct` |
+| **Alt Models** | `llama-3.3-70b-versatile`, `qwen-qwq-32b`, `deepseek-r1-distill-llama-70b` |
+| **Context Window** | 128,000 tokens (Scout: 131,072) |
+| **Rate Limit** | 30 RPM, 7K-30K TPM, 1,000-14,400 RPD |
 | **Auth** | `Authorization: Bearer <GROQ_API_KEY>` |
 | **API Format** | OpenAI-compatible |
-| **SDK** | `openai` SDK with custom base_url |
 | **Signup** | https://console.groq.com |
 | **Latency** | ~100-200ms TTFT (LPU hardware) |
 
-**LiteLLM Model String:** `groq/llama-3.3-70b-versatile`
+**LiteLLM Model String:** `groq/llama-4-scout-17b-16e-instruct`
 
 ### 2.2 Cerebras (BACKUP 1)
 
 | Detail | Value |
 |--------|-------|
 | **Base URL** | `https://api.cerebras.ai/v1` |
-| **Model** | `llama-3.3-70b` |
+| **Model** | `llama-4-scout-17b-16e` |
+| **Alt Models** | `llama-3.3-70b`, `qwen-3-32b` |
 | **Context Window** | 128,000 tokens |
 | **Max Completion** | 8,192 tokens |
 | **Rate Limit** | 30 RPM, 60K TPM, 1M tokens/day |
@@ -78,43 +114,45 @@
 | **Signup** | https://cloud.cerebras.ai |
 | **Latency** | ~100-300ms TTFT |
 
-**LiteLLM Model String:** `cerebras/llama-3.3-70b`
+**LiteLLM Model String:** `cerebras/llama-4-scout-17b-16e`
 
 ### 2.3 SambaNova (BACKUP 2)
 
 | Detail | Value |
 |--------|-------|
 | **Base URL** | `https://api.sambanova.ai/v1` |
-| **Model** | `Meta-Llama-3.3-70B-Instruct` |
+| **Model** | `Llama-4-Maverick-17B-128E-Instruct` |
+| **Alt Models** | `Llama-4-Scout-17B-16E-Instruct`, `DeepSeek-R1`, `QwQ-32B` |
 | **Context Window** | 64K-128K tokens |
 | **Rate Limit** | 240 RPM, 48,000 RPD |
 | **Auth** | `Authorization: Bearer <SAMBANOVA_API_KEY>` |
 | **API Format** | OpenAI-compatible |
 | **Signup** | https://cloud.sambanova.ai |
 
-**LiteLLM Model String:** `sambanova/Meta-Llama-3.3-70B-Instruct`
+**LiteLLM Model String:** `sambanova/Llama-4-Maverick-17B-128E-Instruct`
 
 ### 2.4 Google Gemini (BACKUP 3)
 
 | Detail | Value |
 |--------|-------|
 | **Base URL** | `https://generativelanguage.googleapis.com/v1beta` |
-| **Model** | `gemini-2.0-flash` |
-| **Context Window** | 1,048,576 tokens |
+| **Model** | `gemini-2.5-flash` |
+| **Alt Models** | `gemini-2.5-pro` (2 RPM, 50 RPD) |
+| **Context Window** | 1,048,576 tokens (~1M) |
 | **Rate Limit** | 15 RPM, 1M TPM, 1,500 RPD |
 | **Auth** | `x-goog-api-key` header or `key` query param |
-| **API Format** | Google GenAI SDK (also has OpenAI-compat endpoint) |
 | **SDK** | `pip install google-genai` |
 | **Signup** | https://aistudio.google.com |
 
-**LiteLLM Model String:** `gemini/gemini-2.0-flash`
+**LiteLLM Model String:** `gemini/gemini-2.5-flash`
 
 ### 2.5 Together AI (BACKUP 4)
 
 | Detail | Value |
 |--------|-------|
 | **Base URL** | `https://api.together.ai/v1` |
-| **Model** | `meta-llama/Llama-3.3-70B-Instruct-Turbo-Free` |
+| **Model** | `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8` |
+| **Alt Models** | `deepseek-ai/DeepSeek-R1-Distill-Llama-70B-Free` |
 | **Context Window** | 128,000 tokens |
 | **Rate Limit** | ~60 RPM (dynamic) |
 | **Auth** | `Authorization: Bearer <TOGETHER_API_KEY>` |
@@ -122,20 +160,21 @@
 | **Free Credit** | $5 on signup |
 | **Signup** | https://api.together.ai |
 
-**LiteLLM Model String:** `together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo-Free`
+**LiteLLM Model String:** `together_ai/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8`
 
 ### 2.6 OpenRouter (BACKUP 5 — Last Resort)
 
 | Detail | Value |
 |--------|-------|
 | **Base URL** | `https://openrouter.ai/api/v1` |
-| **Model** | `meta-llama/llama-3.3-70b-instruct:free` |
+| **Model** | `google/gemini-2.5-flash:free` |
+| **Alt Models** | `meta-llama/llama-4-scout:free`, `qwen/qwen-3-32b:free` |
 | **Rate Limit** | 20 RPM, 50 RPD (unfunded) |
 | **Auth** | `Authorization: Bearer <OPENROUTER_API_KEY>` |
 | **API Format** | OpenAI-compatible |
 | **Signup** | https://openrouter.ai |
 
-**LiteLLM Model String:** `openrouter/meta-llama/llama-3.3-70b-instruct:free`
+**LiteLLM Model String:** `openrouter/google/gemini-2.5-flash:free`
 
 ---
 
@@ -146,10 +185,10 @@
 | Detail | Value |
 |--------|-------|
 | **Endpoint** | `POST https://api.voyageai.com/v1/embeddings` |
-| **Model** | `voyage-multilingual-2` |
+| **Model** | `voyage-3` (or `voyage-3-large` for highest quality) |
 | **Dimensions** | 1024 |
-| **Context** | 4,000 tokens |
-| **Free Quota** | 50M tokens on signup |
+| **Context** | 32,000 tokens |
+| **Free Quota** | 200M tokens on signup |
 | **Rate Limit** | 2,000 RPM, 3M-16M TPM |
 | **Auth** | `Authorization: Bearer <VOYAGE_API_KEY>` |
 | **SDK** | `pip install voyageai` |
@@ -160,7 +199,7 @@
 ```python
 import voyageai
 vo = voyageai.Client(api_key="...")
-result = vo.embed(texts=["query text"], model="voyage-multilingual-2", input_type="query")
+result = vo.embed(texts=["query text"], model="voyage-3", input_type="query")
 # result.embeddings → [[0.123, -0.456, ...]]
 ```
 
@@ -168,20 +207,23 @@ result = vo.embed(texts=["query text"], model="voyage-multilingual-2", input_typ
 
 | Detail | Value |
 |--------|-------|
-| **Model** | `text-embedding-004` |
+| **Model** | `gemini-embedding-001` |
 | **Dimensions** | 768 (supports MRL truncation to 256/512) |
 | **Free Quota** | Unlimited (free tier) |
 | **Rate Limit** | 1,500 RPM |
 | **Context** | 2,048 tokens |
 | **SDK** | `pip install google-genai` |
 
+> ⚠️ **Note**: `text-embedding-004` was deprecated and shut down on Jan 14, 2026. Use `gemini-embedding-001` or `gemini-embedding-2` instead.
+
 ### 3.3 Jina AI Embedding (BACKUP 2)
 
 | Detail | Value |
 |--------|-------|
 | **Endpoint** | `POST https://api.jina.ai/v1/embeddings` |
-| **Model** | `jina-embeddings-v3` |
+| **Model** | `jina-embeddings-v4` |
 | **Dimensions** | 1024 (Matryoshka: 256-768) |
+| **Context** | 32,000 tokens |
 | **Free Quota** | 10M tokens on signup |
 | **Rate Limit** | 100 RPM, 100K TPM |
 | **Auth** | `Authorization: Bearer <JINA_API_KEY>` |
@@ -214,6 +256,8 @@ client = QdrantClient(url="https://xxx.aws.cloud.qdrant.io:6333", api_key="...")
 | **Dashboard** | https://app.pinecone.io |
 | **Free Tier** | 2 GB storage, 2M WU/mo, 1M RU/mo |
 | **Max Vectors** | ~250K-300K at 1024d |
+| **Indexes** | Up to 5 indexes, 100 namespaces/index |
+| **Region** | AWS us-east-1 only |
 | **SDK** | `pip install pinecone-client` |
 
 **Connection:**
@@ -264,7 +308,7 @@ await communicate.save("output.mp3")
 | Detail | Value |
 |--------|-------|
 | **Endpoint** | `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}` |
-| **Free Tier** | 10,000 chars/month |
+| **Free Tier** | 10,000 credits/month (shared with STT) |
 | **Auth** | `xi-api-key` header |
 | **SDK** | `pip install elevenlabs` |
 | **Signup** | https://elevenlabs.io |
@@ -281,11 +325,24 @@ await communicate.save("output.mp3")
 | **Languages** | Hindi (`hi`) + 13 other Indic languages |
 | **Total Rows** | ~11.4M (all languages) |
 | **Hindi Train** | ~800K rows |
+| **Full Dataset Size** | ~55 GB (all languages) |
+| **Hindi Subset Size** | ~4 GB |
 | **Fields** | `query`, `Answer`, `query_id`, `query_type`, `passages` |
 | **Passage Fields** | `is_selected`, `English_passages`, `Translated_passages` |
 | **Query Types** | DESCRIPTION, NUMERIC, ENTITY, LOCATION, PERSON |
 
-**Loading:**
+**Loading (streaming to avoid full download):**
+```python
+from datasets import load_dataset
+
+# Stream without downloading full dataset
+dataset = load_dataset("ai4bharat/MSMARCO-XI", "hi", split="train", streaming=True)
+
+# Take a subset
+subset = dataset.take(50000)
+```
+
+**Loading (download Hindi only — ~4 GB, one-time):**
 ```python
 from datasets import load_dataset
 dataset = load_dataset("ai4bharat/MSMARCO-XI", "hi", split="train")

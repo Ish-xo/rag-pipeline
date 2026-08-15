@@ -1,43 +1,53 @@
 # ULTRON-V — Implementation Plan
 
-## Phase 0: Setup & Data Preparation (Day 1 — Aug 16)
+> **Submission Deadline**: August 22, 2026, 11:59 PM
+
+---
+
+## Phase 0: Setup & Data Preparation
 
 ### 0.1 Project Scaffolding
 - [ ] Set up clean project structure (see directory layout below)
-- [ ] Create `.env` with all API keys
+- [ ] Create `.env` with all API keys (see `account_setup.md`)
 - [ ] Set up `pyproject.toml` or `requirements.txt` with pinned dependencies
 - [ ] Configure `litellm` with all 6 LLM providers
-- [ ] Test connectivity to all external services (Sarvam, Groq, Qdrant, Voyage, etc.)
+- [ ] Test connectivity to all external services (Sarvam, ElevenLabs, Groq, Qdrant, Voyage, etc.)
 
-### 0.2 Dataset Download & Exploration
-- [ ] Download MSMARCO-XI Hindi subset (`ai4bharat/MSMARCO-XI`, `hi`, split `train`)
-- [ ] Download English MSMARCO (or use `Eng_Query` / `English_passages` from MSMARCO-XI)
-- [ ] Explore data: count unique passages, analyze passage lengths, check query types
-- [ ] Determine optimal subset size (target: ~100K unique passages)
+### 0.2 Dataset Acquisition & Exploration
+- [ ] Load MSMARCO-XI Hindi subset using **streaming mode** to avoid downloading the full 55 GB dataset
+  ```python
+  from datasets import load_dataset
+  ds = load_dataset("ai4bharat/MSMARCO-XI", "hi", split="train", streaming=True)
+  ```
+- [ ] Explore data structure: count unique passages, analyze passage lengths, check query types
+- [ ] Determine optimal subset size (target: ~100K unique passages from ~50K queries)
+- [ ] Stream and extract only the data we need → save as local JSONL (~500 MB)
+
+> **Dataset download strategy**: We do NOT download the full 55 GB dataset. We use HuggingFace streaming to iterate through the Hindi subset (~4 GB) and extract only unique passages into a local JSONL file. This is a **one-time local operation** — the deployed app never needs the raw dataset, only the pre-built vector index in Qdrant/Pinecone.
 
 ### 0.3 Data Processing Pipeline
-- [ ] Deduplicate passages across queries (many queries share same passages)
+- [ ] Deduplicate passages across queries (many queries share the same passages)
 - [ ] Clean text: normalize unicode, remove HTML artifacts, trim whitespace
 - [ ] Build passage registry: `passage_id → {english_text, hindi_text, metadata}`
 - [ ] Export clean passages as JSONL for embedding
 
 ---
 
-## Phase 1: Embedding & Indexing (Day 1-2 — Aug 16-17)
+## Phase 1: Embedding & Indexing
 
 ### 1.1 Embedding Generation
-- [ ] Set up Voyage AI client (`voyage-multilingual-2`, 1024d)
-- [ ] Set up Gemini embedding client as backup (`text-embedding-004`, 768d)
+- [ ] Set up Voyage AI client (`voyage-3`, 1024d)
+- [ ] Set up Gemini embedding client as backup (`gemini-embedding-001`, 768d)
 - [ ] Batch embed all ~100K English passages via Voyage AI
   - Batch size: 128 passages per request
   - Rate: 2,000 RPM → ~16 batches/sec → ~100K passages in ~15 min
-  - Token budget: ~100K × 80 tokens = ~8M tokens (16% of Voyage's 50M free)
+  - Token budget: ~100K × 80 tokens = ~8M tokens (4% of Voyage's 200M free)
 - [ ] Save embeddings locally as `.npy` files (backup before uploading)
 - [ ] Build embedding ID → passage metadata mapping
 
 ### 1.2 Vector Database Setup
 - [ ] Create Qdrant Cloud free cluster
-- [ ] Create collection `ultron_passages` with schema (see technical_details.md)
+- [ ] Create collection `ultron_passages` with schema (see `technical_details.md`)
 - [ ] Configure scalar quantization (int8) for memory efficiency
 - [ ] Batch upload vectors + payloads to Qdrant
 - [ ] Verify with test queries
@@ -56,7 +66,7 @@
 
 ---
 
-## Phase 2: RAG Pipeline Core (Day 3-4 — Aug 18-19)
+## Phase 2: RAG Pipeline Core
 
 ### 2.1 Query Processing Module
 - [ ] Language detection (from STT or via fasttext/langdetect)
@@ -80,10 +90,7 @@
 - [ ] Implement LLM provider cascade (Groq → Cerebras → SambaNova → Gemini → Together → OpenRouter)
 - [ ] Use `litellm` for unified API interface
 - [ ] Use `instructor` for structured output (RAGResponse schema)
-- [ ] System prompt design:
-  - "You are ULTRON-V, a precise retrieval-augmented AI..."
-  - Include retrieved passages as context
-  - Instruct to cite sources, flag uncertainty, stay grounded
+- [ ] System prompt design (see `prompts.md`)
 - [ ] Implement streaming for TTFT optimization
 - [ ] Token budget management: limit context to fit within model's window
 
@@ -111,9 +118,32 @@
 
 ---
 
-## Phase 3: Frontend & Integration (Day 5 — Aug 20)
+## Phase 3: STT, TTS & Frontend Integration
 
-### 3.1 Gradio UI
+### 3.1 STT Integration
+- [ ] Sarvam STT client (primary)
+  - Handle audio format conversion (wav/mp3 at 16kHz)
+  - Send to `/speech-to-text` endpoint
+  - Parse transcript + language detection
+  - Handle errors (empty audio, too long, etc.)
+- [ ] ElevenLabs Scribe STT client (backup)
+  - `scribe_v2` model
+  - Hindi + English support
+  - Word-level timestamps
+- [ ] STT failover logic: Sarvam → ElevenLabs → text input fallback
+
+### 3.2 TTS Integration
+- [ ] `edge-tts` async client (primary)
+  - Auto-select voice based on detected language
+  - Hindi: `hi-IN-SwaraNeural` / `hi-IN-MadhurNeural`
+  - English: `en-IN-NeerjaNeural` / `en-IN-PrabhatNeural`
+- [ ] Sarvam TTS client (secondary)
+  - `bulbul:v3` model
+  - Handle 2,500 char limit (split long answers)
+- [ ] ElevenLabs TTS client (tertiary, for polish)
+- [ ] TTS provider selection based on availability/quality preference
+
+### 3.3 Gradio UI
 - [ ] Main interface: Audio input (microphone) + Text input (optional)
 - [ ] Custom theme: Ultron dark theme (dark background, red/crimson accents)
 - [ ] Components:
@@ -128,24 +158,6 @@
   - Number of sources to show
   - Chunking strategy toggle (for demo purposes)
 
-### 3.2 STT Integration
-- [ ] Sarvam STT client
-  - Handle audio format conversion (wav/mp3 at 16kHz)
-  - Send to `/speech-to-text` endpoint
-  - Parse transcript + language detection
-  - Handle errors (empty audio, too long, etc.)
-
-### 3.3 TTS Integration
-- [ ] `edge-tts` async client (primary)
-  - Auto-select voice based on detected language
-  - Hindi: `hi-IN-SwaraNeural` / `hi-IN-MadhurNeural`
-  - English: `en-IN-NeerjaNeural` / `en-IN-PrabhatNeural`
-- [ ] Sarvam TTS client (secondary)
-  - `bulbul:v3` model
-  - Handle 2,500 char limit (split long answers)
-- [ ] ElevenLabs client (tertiary, for polish)
-- [ ] TTS provider selection based on availability/quality preference
-
 ### 3.4 End-to-End Pipeline Wiring
 - [ ] Wire: Audio → STT → Query Processing → Retrieval → Generation → TTS → Audio
 - [ ] Handle async flow (non-blocking UI)
@@ -154,7 +166,7 @@
 
 ---
 
-## Phase 4: Latency Benchmarking (Day 6 — Aug 21)
+## Phase 4: Latency Benchmarking
 
 ### 4.1 Benchmark Script
 - [ ] Select 100+ test queries from MSMARCO-XI validation set
@@ -179,7 +191,7 @@
 
 ---
 
-## Phase 5: Polish & Deploy (Day 6-7 — Aug 21-22)
+## Phase 5: Polish, Deploy & Submit
 
 ### 5.1 Deployment to HF Spaces
 - [ ] Create Hugging Face Space (`ultron-v`, Gradio SDK)
@@ -249,6 +261,8 @@ rag-pipeline/
 │   ├── technical_details.md
 │   ├── implmentation_plan.md
 │   ├── api_reference.md
+│   ├── account_setup.md
+│   ├── prompts.md
 │   └── latency_results.md
 ├── src/
 │   ├── __init__.py
@@ -258,6 +272,7 @@ rag-pipeline/
 │   ├── stt/                      # Speech-to-Text
 │   │   ├── __init__.py
 │   │   ├── sarvam_client.py
+│   │   ├── elevenlabs_client.py
 │   │   └── base.py               # STT interface
 │   │
 │   ├── tts/                      # Text-to-Speech
@@ -309,7 +324,7 @@ rag-pipeline/
 │       └── dashboard.py          # Gradio analytics components
 │
 ├── scripts/
-│   ├── download_dataset.py       # Download & preprocess MSMARCO-XI
+│   ├── prepare_dataset.py        # Stream MSMARCO-XI, extract & deduplicate passages
 │   ├── embed_passages.py         # Batch embed passages
 │   ├── upload_vectors.py         # Upload to Qdrant/Pinecone
 │   ├── benchmark.py              # Run latency benchmarks
@@ -334,13 +349,13 @@ rag-pipeline/
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Sarvam STT rate limit hit | Can't process voice input | Cache transcripts, suggest text input as fallback |
+| Sarvam STT rate limit hit | Can't process voice input | Failover to ElevenLabs Scribe; offer text input fallback |
 | All LLM providers rate-limited simultaneously | No answer generation | Return raw retrieved passages as answer |
 | Qdrant 7-day inactivity deletion | Lose all indexed data | Keep-alive cron + Pinecone backup |
 | Voyage AI token quota exhausted | Can't embed new queries | Switch to Gemini embeddings at query time |
 | HF Spaces downtime | Live link broken | Have backup deployment ready (Render/Railway) |
-| 200ms latency impossible for full pipeline | Poor benchmark numbers | Separate retrieval latency from generation, show both |
-| Dataset too large for free tier | Can't index enough data | Aggressive deduplication + smart sampling |
+| 200ms latency impossible for full pipeline | Poor benchmark numbers | Separate retrieval latency from generation, report both clearly |
+| ElevenLabs shared credits exhausted | STT backup + TTS unavailable | Use edge-tts for TTS, text input for STT |
 
 ---
 
@@ -363,7 +378,6 @@ google-genai
 
 # Embeddings
 voyageai
-google-generativeai
 
 # Vector DB
 qdrant-client>=1.7.0
@@ -371,8 +385,8 @@ pinecone-client>=3.0.0
 
 # STT/TTS
 sarvamai
-edge-tts
 elevenlabs
+edge-tts
 
 # Data Processing
 datasets  # HuggingFace datasets

@@ -39,17 +39,11 @@
 
 ---
 
-## 📅 Timeline
+## 📅 Deadline
 
-| Date | Milestone |
-|------|-----------|
-| Aug 13 | Task launched |
-| Aug 15 | Planning complete, architecture finalized |
-| Aug 16-17 | Dataset processing, embedding, vector DB setup |
-| Aug 18-19 | RAG pipeline core (retrieval + generation + harness + guardrails) |
-| Aug 20 | Frontend UI, STT/TTS integration, deployment to HF Spaces |
-| Aug 21 | Latency benchmarking (P50/P70/P100), testing, bug fixes |
-| Aug 22 | Videos recorded, social media posts, **submission by 11:59 PM** |
+**Submission Deadline**: August 22, 2026, 11:59 PM
+
+No resubmissions allowed — submit only when the build is final.
 
 ---
 
@@ -79,4 +73,9 @@
 
 ## 💰 Budget: $0
 
-Everything runs on **free tiers only**. No paid APIs. No credit card required for any service. Multiple backup providers to avoid rate limiting.
+Everything runs on **free tiers only**. No paid APIs. No credit card required for any service. Multiple backup providers at every layer to avoid rate limiting:
+- **STT**: Sarvam AI (primary) + ElevenLabs Scribe (backup)
+- **LLM**: 6-provider cascade (Groq → Cerebras → SambaNova → Gemini → Together → OpenRouter)
+- **Embeddings**: Voyage AI (primary) + Gemini (backup) + Jina AI (backup)
+- **Vector DB**: Qdrant Cloud (primary) + Pinecone (backup)
+- **TTS**: edge-tts (primary, unlimited) + Sarvam (secondary) + ElevenLabs (tertiary)
