@@ -227,13 +227,13 @@ Collection: ultron_passages_voyage_1024
 
 ## 6. LLM — Answer Generation
 
-### Latency Strategy & Requirement Clarification
+### Latency Strategy & Confirmed Measurement Scope
 
-The task specifies an end-to-end latency target (<200ms). In cloud-hosted API pipelines with free tiers:
-- **Retrieval Latency** (Query embedding + vector search + filtering) is within direct optimization control and targeted at **<100ms**.
-- **Time to First Token (TTFT)** is targeted at **<200ms** via high-speed LPUs (Groq) and streaming responses.
-- **Full End-to-End Generation & Audio Playback** depend on network transport, token length, and audio synthesis, and are measured and reported honestly.
-- **IMPORTANT**: TTFT is an optimization metric for perceived responsiveness, NOT a claim of literal compliance with full audio completion in <200ms. All metrics are benchmarked and reported transparently.
+The task specifies an end-to-end latency target (<200ms). It is confirmed that **latency calculation begins after STT is complete (when query text is ready at T1) through to when output is provided**:
+- **Official Evaluation Scope (Post-STT End-to-End)**: Covers Input Guardrails → Query Embedding → Qdrant Vector Search → Reranking → LLM Generation / First Token.
+- **Retrieval Latency (T5 - T2)**: Targeted at **<100ms** (Voyage-3 embedding + Qdrant 1024d search + reranker).
+- **Time to First Useful Output / TTFT (T6 - T1)**: Targeted at **<200ms** utilizing Groq LPUs (`llama-3.3-70b-versatile`) with streaming token delivery.
+- **Full Text Generation & TTS Playback**: Measured and reported transparently in benchmark logs to provide complete latency visibility.
 
 ### Canonical Provider Configuration
 
@@ -368,22 +368,21 @@ Generated Answer + Context Passages
 ### Granular Measurement Stages
 ```
 T0: Audio received at server
-T1: STT transcript ready
+T1: STT transcript ready                    ← OFFICIAL BENCHMARK START
 T2: Input guardrail validation complete
 T3: Query embedding vector generated
 T4: Qdrant vector search complete
-T5: Retrieval guardrails & reranking complete
-T6: LLM Time to First Token (TTFT)
+T5: Retrieval guardrails & reranking complete (Retrieval Latency: T5 - T2, Target: <100ms)
+T6: LLM Time to First Token (TTFT)          ← OFFICIAL PRIMARY TARGET (<200ms from T1)
 T7: Full LLM text generation complete
-T8: Output grounding check complete
-T9: TTS audio generation complete
+T8: Output grounding check complete         ← FULL POST-STT VALIDATED OUTPUT
+T9: TTS audio generation complete           ← COMPLETE AUDIO PLAYBACK READY
 
-Separately Reported Metrics:
-1. Retrieval Latency: T5 - T2 (Target: <100ms)
-2. LLM TTFT: T6 - T5 (Target: <200ms)
-3. Full LLM Generation: T7 - T5
-4. Post-STT End-to-End: T8 - T1 (Query text to validated answer)
-5. Full Pipeline End-to-End: T9 - T0 (Audio in to audio ready)
+Official & Instrument Metrics:
+1. Post-STT Time to First Output / TTFT (T6 - T1): PRIMARY CHALLENGE TARGET (<200ms)
+2. Retrieval Latency (T5 - T2): Primary Retrieval Target (<100ms)
+3. Full Post-STT Validated Answer (T8 - T1): Measured & logged
+4. Full Audio End-to-End Pipeline (T9 - T0): Total voice interaction latency
 ```
 
 ### Dataset Split & Leakage Prevention

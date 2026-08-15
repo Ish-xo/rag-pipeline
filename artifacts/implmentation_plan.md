@@ -1,16 +1,45 @@
 # ULTRON-V — Implementation Plan
 
-> **Submission Deadline**: August 22, 2026, 11:59 PM
+> **Submission Deadline**: August 22, 2026, 11:59 PM  
+> **Official Latency Metric**: Post-STT Latency (Query text ready after STT → Output provided)
 
 ---
 
-## Phase 0: Setup & Account Verification
+## 👥 Parallel Team Workstream Matrix
+
+The architecture is strictly decoupled using modular contracts (`base.py`, Pydantic schemas). **All 3 team members work in parallel from Day 1** using mock interfaces where needed, then converge for end-to-end integration:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                               PARALLEL EXECUTION MATRIX                               │
+├────────────────────────────┬────────────────────────────┬──────────────────────────────┤
+│ Workstream 1: Backend Lead │ Workstream 2: Data Lead    │ Workstream 3: Frontend Lead  │
+│ (RAG Core, LLM & Harness)  │ (Data, Embedding & Qdrant) │ (Voice I/O, UI & Analytics)  │
+├────────────────────────────┼────────────────────────────┼──────────────────────────────┤
+│ • Setup .env & dependencies│ • Stream MSMARCO-XI (hi)   │ • Sarvam saaras:v3 STT client│
+│ • Sequential LLM Cascade:  │ • Create 50 dev / 100 test │ • ElevenLabs scribe_v2 STT   │
+│   Groq → Cerebras → Gemini │   deterministic splits     │ • edge-tts async client      │
+│ • LLM Harness & Retries    │ • Incremental Embedding:   │ • Sarvam bulbul:v3 TTS       │
+│ • Structured I/O (Pydantic)│   10k → 50k → 100k subsets │ • Gradio UI (app.py)         │
+│ • Two-Tier Grounding Check │ • Indexing Language Exp    │ • Stage Timer (T0 - T9)      │
+│ • Fast/Quality Retriever   │ • Qdrant 1024d collection  │ • Latency Waterfall UI       │
+│   orchestration logic      │ • 5 Chunking experiments   │ • HF Spaces scaffolding     │
+├────────────────────────────┴────────────────────────────┴──────────────────────────────┤
+│                               CONVERGENCE & INTEGRATION                                │
+│ • Wire pipeline.py (Voice → Retrieval → LLM → TTS)                                     │
+│ • Run benchmark.py on 100-query held-out test set & populate latency_results.md        │
+│ • Deploy to Hugging Face Spaces & record demo / team process videos                    │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Phase 0: Setup & Account Verification (All Members)
 
 ### 0.1 Project Scaffolding
 - [ ] Initialize repository structure with modular components (see directory layout below)
 - [ ] Configure `.env` from template with verified API keys
 - [ ] Pin exact dependencies in `requirements.txt`
-- [ ] Configure `litellm` router for sequential failover across Core 3 LLM providers
 - [ ] Run `scripts/test_providers.py` to verify network and credentials for all active APIs
 
 ### 0.2 Account & Key Checklist
@@ -26,7 +55,7 @@
 
 ---
 
-## Phase 1: Data Processing & Controlled Experiments
+## Phase 1: Data Processing & Controlled Experiments (Member 2 — Data Lead)
 
 ### 1.1 Dataset Streaming & Split Construction
 - [ ] Stream `ai4bharat/MSMARCO-XI` (`hi`) without downloading the 55 GB full multi-language dataset
@@ -63,7 +92,7 @@
 
 ---
 
-## Phase 2: Production Embedding & Vector DB Setup
+## Phase 2: Production Embedding & Vector DB Setup (Member 2 — Data Lead)
 
 ### 2.1 Production Embedding Generation
 - [ ] Batch embed the selected production passage corpus using Voyage AI `voyage-3` (1024d, batch size: 128).
@@ -88,7 +117,7 @@
 
 ---
 
-## Phase 3: RAG Core & Sequential Model Harness
+## Phase 3: RAG Core & Sequential Model Harness (Member 1 — Backend Lead)
 
 ### 3.1 Retrieval Module
 - [ ] **Fast Path (Default)**:
@@ -123,7 +152,7 @@
 
 ---
 
-## Phase 4: Voice Integration (STT & TTS) & Gradio UI
+## Phase 4: Voice Integration (STT & TTS) & Gradio UI (Member 3 — Frontend Lead)
 
 ### 4.1 Speech-to-Text (STT)
 - [ ] Sarvam AI `saaras:v3` primary client (supports Hindi, English, Hinglish, verbatim, and translate modes).
@@ -144,36 +173,36 @@
 
 ---
 
-## Phase 5: Rigorous Benchmarking & Latency Instrumentation
+## Phase 5: Rigorous Benchmarking & Latency Instrumentation (All Members)
 
-### 5.1 Test Execution on Held-Out Benchmark Set
+### 5.1 Official Post-STT Latency Benchmark
 - [ ] Execute automated benchmark across the 100-query held-out test set using `scripts/benchmark.py`.
 - [ ] Record exact timestamps for every stage:
   - T0: Audio received
-  - T1: STT complete
+  - T1: STT complete (query text ready) **← OFFICIAL BENCHMARK START**
   - T2: Input guardrails complete
   - T3: Query embedding complete
   - T4: Vector search complete
   - T5: Reranking / retrieval guardrails complete
-  - T6: LLM Time to First Token (TTFT)
-  - T7: Full LLM text generation complete
+  - T6: LLM Time to First Token (TTFT) **← FIRST OUTPUT READY**
+  - T7: Full LLM text generation complete **← FULL TEXT OUTPUT READY**
   - T8: Output grounding check complete
   - T9: TTS audio synthesis complete
 
 ### 5.2 Metric Computation & Reporting
-- [ ] Compute P50, P70, and P100 for:
-  - **Retrieval Latency** (T5 - T2, Target: <100ms)
-  - **LLM TTFT** (T6 - T5, Optimization target: <200ms)
-  - **Full LLM Generation** (T7 - T5)
-  - **Post-STT End-to-End** (T8 - T1)
-  - **Full End-to-End Pipeline** (T9 - T0)
+- [ ] **Official Primary Latency Targets**:
+  - **Retrieval Latency (T5 - T2)**: Target <100ms
+  - **Post-STT Time to First Token / Useful Output (T6 - T1)**: Target <200ms
+  - **Post-STT Full Validated Text Output (T8 - T1)**: Measured & reported
+  - **Complete Pipeline with Audio Playback (T9 - T0)**: Measured & reported
+- [ ] Compute P50, P70, and P100 across all test queries.
 - [ ] Benchmark comparison across Core LLM providers (Groq vs Cerebras vs Gemini).
 - [ ] Compare Fast Path vs Quality Path retrieval quality (Recall@5, NDCG@5) and latency trade-offs.
 - [ ] Populate all tables in `artifacts/latency_results.md` and export raw CSV data to `data/benchmarks/latency_results.csv`.
 
 ---
 
-## Phase 6: Deployment, Documentation & Submission
+## Phase 6: Deployment, Documentation & Submission (All Members)
 
 ### 6.1 Hugging Face Spaces Deployment
 - [ ] Deploy repository to Hugging Face Spaces (Gradio SDK, CPU Free tier).

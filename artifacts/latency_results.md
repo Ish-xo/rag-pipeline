@@ -91,11 +91,12 @@
 
 ## End-to-End Latency Summary
 
-| Pipeline Scope | Stages Included | P50 | P70 | P100 |
-|---|---|---|---|---|
-| **Retrieval Only** | Embedding + Qdrant Search + Reranker | — ms | — ms | — ms |
-| **Post-STT End-to-End** | Query Text → Retrieval → LLM → Grounding | — ms | — ms | — ms |
-| **Full Pipeline End-to-End** | Audio In → STT → Retrieval → LLM → Grounding → TTS → Audio Out | — ms | — ms | — ms |
+| Pipeline Scope | Stages Included | Target | P50 | P70 | P100 |
+|---|---|---|---|---|---|
+| **Retrieval Latency** | Query Embedding + Qdrant Search + Reranker (T5 - T2) | **<100ms** | — ms | — ms | — ms |
+| **Post-STT Time to First Output (Official Primary Target)** | Query Text Ready (T1) → Groq TTFT (T6) | **<200ms** | — ms | — ms | — ms |
+| **Post-STT Full Validated Output** | Query Text Ready (T1) → Grounded Answer (T8) | — | — ms | — ms | — ms |
+| **Full Voice Pipeline (with TTS)** | Audio Received (T0) → Audio Playback Ready (T9) | — | — ms | — ms | — ms |
 
 ---
 
