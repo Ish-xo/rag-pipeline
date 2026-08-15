@@ -93,7 +93,9 @@ Query: {query_text}
 Classification (respond with exactly one word: SAFE or UNSAFE):
 ```
 
-### 5.2 Grounding Check
+### 5.2 Grounding Check (Tier 2 LLM Verifier — Selective)
+
+> Note: Tier 1 is a fast deterministic suspicion check (validating citation tags, matching entity names/numbers). Tier 2 LLM verification is executed only for queries flagged as ambiguous by Tier 1.
 
 ```
 Given the following answer and the context passages it was generated from, determine if the answer is GROUNDED in the passages.

@@ -2,25 +2,59 @@
 
 ## System Overview
 
+### Default Pipeline (Fast Path — latency-optimized)
+
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         ULTRON-V Pipeline                              │
-│                                                                        │
-│  🎤 Audio ──► [STT] ──► [Query Processor] ──► [Retriever] ──►         │
-│                              │                     │                   │
-│                              ▼                     ▼                   │
-│                         [Guardrails]          [Vector DB]              │
-│                              │                     │                   │
-│                              ▼                     ▼                   │
-│                         [LLM Harness] ◄─── Retrieved Context          │
-│                              │                                         │
-│                              ▼                                         │
-│                      [Answer + Citations]                              │
-│                              │                                         │
-│                              ▼                                         │
-│                          [TTS] ──► 🔊 Audio                           │
-└─────────────────────────────────────────────────────────────────────────┘
+🎤 Audio
+   ↓
+┌──────────────┐
+│  STT         │  Sarvam saaras:v3 (primary) → ElevenLabs scribe_v2 (backup)
+└──────┬───────┘
+       ↓
+┌──────────────┐
+│  Input Guard │  safety/topic filter (deterministic, <5ms)
+└──────┬───────┘
+       ↓
+┌──────────────┐
+│  Embedding   │  Voyage AI voyage-3 (1024d)
+└──────┬───────┘
+       ↓
+┌──────────────┐
+│  Qdrant      │  Top-K vector search (1024d collection)
+└──────┬───────┘
+       ↓
+┌──────────────┐
+│  Reranker    │  cosine threshold + diversity filter (deterministic, <5ms)
+└──────┬───────┘
+       ↓
+┌──────────────┐
+│  LLM Harness │  Sequential failover: Groq → Cerebras → Gemini (Core 3)
+└──────┬───────┘
+       ↓
+┌──────────────┐
+│  Grounding   │  Tier 1 deterministic check (<5ms) → Tier 2 LLM verifier (if ambiguous)
+└──────┬───────┘
+       ↓
+┌──────────────┐
+│  edge-tts    │  TTS (hi-IN-SwaraNeural / en-IN-NeerjaNeural)
+└──────┬───────┘
+       ↓
+     🔊
 ```
+
+### Quality Path (accuracy-optimized, opt-in)
+
+```
+STT → Input Guard → [Query Expansion + HyDE + Direct Embedding]
+                                    ↓
+                          [3× parallel Qdrant search]
+                                    ↓
+                              [RRF Fusion]
+                                    ↓
+                           [LLM Harness → Grounding → TTS]
+```
+
+> **Design philosophy**: Simple default pipeline + sophisticated optional retrieval. The fast path is the demo default. The quality path is an experimental mode that shows we can do more. Both are benchmarked and compared.
 
 ---
 
@@ -32,9 +66,9 @@
 - **Rate Limit**: 60 RPM
 - **Max Audio Length**: 30 seconds per request (REST API)
 - **Languages**: Hindi (`hi-IN`), English (`en-IN`), auto-detect
-- **Features**: 
+- **Key Features**: 
   - `mode=transcribe` — verbatim transcription
-  - `mode=translate` — Indic speech → English text (useful!)
+  - `mode=translate` — Indic speech → English text (useful for cross-lingual retrieval)
   - `mode=codemix` — Hinglish support
   - Auto language detection when `language_code` omitted
 - **Auth**: `api-subscription-key` header
@@ -44,54 +78,41 @@
 - **Free Tier**: 10,000 credits/month (shared with TTS)
 - **Concurrency**: 8 concurrent requests on free tier
 - **Languages**: 90+ languages including Hindi + 10 Indic languages
-- **Features**:
-  - Speaker diarization (up to 32 speakers)
-  - Word-level timestamps
-  - Audio event tagging (laughter, applause, etc.)
-  - Code-switching support (Hinglish)
+- **Key Features**: Speaker diarization, word-level timestamps, code-switching
 - **Auth**: `xi-api-key` header
 
-### STT Failover Logic
-1. Try Sarvam first (native Indic support, better Hindi quality)
-2. If Sarvam fails / rate-limited → fallback to ElevenLabs Scribe
-3. If both fail → prompt user for text input
+### Failover: Sarvam (`saaras:v3`) → ElevenLabs (`scribe_v2`) → text input prompt
 
 ---
 
-## 2. Chunking Strategy
+## 2. Chunking Strategies & Production Strategy Selection
 
 > **Task requirement**: *"Chunking strategy should be vast — don't submit a single naive fixed-size chunking approach."*
 
-The MSMARCO-XI dataset is **pre-chunked into passages** (~10 passages per query). But we need to show sophisticated handling. Our multi-strategy approach:
+The MSMARCO-XI dataset contains **~10 passages per query**. Each passage is a self-contained text unit (~60-80 words). These are independently sourced web passages grouped by query relevance, not sequential pages of a single document.
 
-### Strategy 1: Passage-Level Indexing (Base)
-- Each passage is a retrieval unit (~60-80 words avg)
-- Natural semantic boundaries from the original MS MARCO dataset
-- Metadata: `query_id`, `query_type`, `is_selected`, `language`
+### Experimental Chunking Strategies (Benchmarked in Isolated Collections)
+1. **Strategy 1: Native Passage-Level (Base)**
+   - Each passage = one retrieval unit (~60-80 words)
+   - Preserves original MS MARCO semantic boundaries
+   - Metadata: `query_id`, `query_type`, `is_selected`, `language`
+2. **Strategy 2: Fixed Token Window**
+   - Split passages into fixed 128-token windows without overlap
+   - Baseline strategy for token-budget comparison
+3. **Strategy 3: Sliding Window with Overlap**
+   - 256 token windows with 64 token overlap
+   - Parent-child tracking: each sub-chunk references its parent passage
+4. **Strategy 4: Semantic Sentence Grouping**
+   - Group sentences within a single passage by semantic similarity
+   - Split at topic transitions within a passage (never merge across unrelated passages)
+5. **Strategy 5: Parent-Child Hierarchical**
+   - Index sentence-level child chunks for high precision
+   - Return parent passage as context for LLM generation
 
-### Strategy 2: Sliding Window with Overlap
-- For longer passages, apply sliding window (256 tokens, 64 token overlap)
-- Ensures no context is lost at chunk boundaries
-- Parent-child tracking: each sub-chunk references its parent passage
-
-### Strategy 3: Semantic Chunking
-- Group consecutive passages that are semantically related (cosine similarity > threshold)
-- Merge related passages into "mega-chunks" for broader context retrieval
-- Use embedding similarity between adjacent passages to detect topic shifts
-
-### Strategy 4: Metadata-Enriched Chunks
-- Augment each chunk with:
-  - `query_type` (DESCRIPTION, NUMERIC, ENTITY, LOCATION, PERSON)
-  - `is_selected` flag (ground truth relevance)
-  - Original English passage (for cross-lingual retrieval)
-  - Translated passage (for native language generation)
-  - Source query (for contextual understanding)
-
-### Strategy 5: Hypothetical Document Embedding (HyDE)
-- At query time: generate a hypothetical answer using the LLM
-- Embed the hypothetical answer instead of the raw query
-- Search for passages similar to the hypothetical answer
-- Better retrieval quality for complex questions
+### Production Selection Rule
+- All 5 strategies are evaluated experimentally on a held-out development set using temporary collections.
+- **We do NOT deploy all 5 strategies simultaneously in production.**
+- After benchmarking, the single best-performing chunking strategy (highest Recall@5 / NDCG@5 with minimal retrieval latency overhead) is selected and indexed into the final production Qdrant collection.
 
 ### Chunk Metadata Schema
 ```json
@@ -113,65 +134,80 @@ The MSMARCO-XI dataset is **pre-chunked into passages** (~10 passages per query)
 
 ---
 
-## 3. Embedding
+## 3. Retrieval Strategies (Separate from Chunking)
 
-### Primary: Voyage AI `voyage-3`
-- **Dimensions**: 1024
-- **Free Quota**: 200M tokens on signup
-- **Context Window**: 32,000 tokens
-- **Rate Limit**: 2,000 RPM
-- **Strengths**: State-of-the-art multilingual retrieval quality, excellent for Indic languages, massive free quota
-- **Usage**: Batch embed all passages during ingestion + query-time embedding
+### Strategy 1: Dense Direct Retrieval (DEFAULT — Fast Path)
+- Embed query → Qdrant top-K search → return passages
+- Lowest latency path (~50-100ms total retrieval)
 
-### Backup 1: Google Gemini `gemini-embedding-001`
-- **Dimensions**: 768
-- **Free Quota**: Unlimited (free tier)
-- **Rate Limit**: 1,500 RPM
-- **Strengths**: No monthly token cap, very high RPM
-- **Usage**: Fallback if Voyage quota exhausted
+### Strategy 2: Query Expansion (Quality Path)
+- Generate 2-3 query variants via LLM
+- Run parallel vector searches for each variant
+- Merge results using RRF
 
-> ⚠️ **Note**: `text-embedding-004` was deprecated and shut down on Jan 14, 2026. Use `gemini-embedding-001` instead.
+### Strategy 3: HyDE — Hypothetical Document Embedding (Quality Path)
+- Generate hypothetical answer via LLM
+- Embed hypothetical answer and search
+- Better for complex or ambiguous queries
 
-### Backup 2: Jina AI `jina-embeddings-v4`
-- **Dimensions**: 1024 (Matryoshka to 256-768)
-- **Context Window**: 32,000 tokens
-- **Free Quota**: 10M tokens on signup
-- **Rate Limit**: 100 RPM
-- **Strengths**: Multimodal text/image model, 3.8B parameters
+### Strategy 4: Ensemble + RRF (Quality Path)
+- Run direct + expanded + HyDE searches in parallel
+- Merge using Reciprocal Rank Fusion
+- Re-rank by cosine similarity threshold
 
-### Embedding Strategy
-- **Index-time**: Use Voyage AI `voyage-3` for all passage embeddings (highest quality, 200M free tokens is more than enough)
-- **Query-time**: Also use Voyage AI (same embedding space for consistency), fallback to Gemini
-- **Dimensionality**: 1024d for Voyage, 768d for Gemini (separate collections if needed)
-
-> **Important**: We index **English passages** for embedding (better multilingual embedding quality). Translated text is stored as metadata payload for answer generation.
+> **Critical**: HyDE and query expansion add an LLM call BEFORE retrieval. This is **only used in the opt-in quality path**, never in the default fast path.
 
 ---
 
-## 4. Vector Database
+## 4. Embedding & Fallback Architecture
+
+### Canonical Configuration
+
+| Role | Provider | Model | Dimensions | Free Quota |
+|------|----------|-------|------------|------------|
+| **Primary** | Voyage AI | `voyage-3` | 1024 | 200M tokens |
+| **Backup 1** | Google Gemini | `gemini-embedding-001` | 768 | Unlimited (Free Tier) |
+| **Backup 2 (Stretch)** | Jina AI | `jina-embeddings-v4` | 1024 | 10M tokens |
+
+### Embedding Dimension Isolation Rule
+- **Primary Collection**: `ultron_passages_voyage_1024` (1024 dimensions, Cosine distance).
+- **Fallback Collection**: `ultron_passages_gemini_768` (768 dimensions, Cosine distance).
+- ⚠️ **STRICT PROHIBITION**: A 768d vector from Gemini must NEVER be queried against a 1024d Voyage collection. Vectors must NEVER be padded, truncated, or resized across dimensions.
+- If Voyage AI is unavailable at query time, Gemini fallback is only activated if the corresponding `ultron_passages_gemini_768` collection has been indexed. Otherwise, the system fails over to a secondary 1024d provider (Jina AI `jina-embeddings-v4` which matches the 1024d space, or returns cached results).
+
+### Incremental Embedding Strategy
+- **Dataset Size Experiment (10K → 50K → 100K)**:
+  - First, embed 10,000 unique passages → save to `data/embeddings/voyage_10k.npy`.
+  - Next, embed the additional 40,000 unique passages → concatenate with 10k to form 50k (`data/embeddings/voyage_50k.npy`).
+  - Next, embed the remaining 50,000 unique passages → concatenate to form 100k (`data/embeddings/voyage_100k.npy`).
+  - **No passage is ever embedded twice.**
+
+### Indexing Language Experiment
+- Compare 4 configurations on a 10K sample to empirically validate the best approach:
+  1. English index + English queries
+  2. Hindi index + Hindi queries
+  3. English index + Hindi queries (cross-lingual)
+  4. Dual English + Hindi index + Hindi queries
+
+---
+
+## 5. Vector Database
 
 ### Primary: Qdrant Cloud (Free Tier)
 - **Storage**: 4 GB disk, 1 GB RAM, 0.5 vCPU
 - **Capacity**: ~500K vectors at 1024d (uncompressed), ~1M with scalar quantization
-- **Features**: 
-  - HNSW index for fast ANN search
-  - Payload filtering (filter by `language`, `query_type`, etc.)
-  - Scalar quantization (int8) to fit more vectors
-  - Multi-vector support
-- **Inactivity Policy**: Suspended after 7 days idle, deleted after 4 weeks
-  - Mitigation: Set up a keep-alive cron ping
+- **Features**: HNSW index, payload filtering, scalar quantization (int8)
+- **Inactivity Policy**: Suspended after 7 days idle → keep-alive cron
 
 ### Backup: Pinecone Serverless (Free Tier)
-- **Storage**: 2 GB
-- **Capacity**: ~250K-300K vectors at 1024d
-- **Rate Limits**: 2M write units/mo, 1M read units/mo
+- **Storage**: 2 GB, ~250K-300K vectors at 1024d
+- **Rate Limits**: 2M WU/mo, 1M RU/mo
 - **Region**: AWS us-east-1 only
-- **Usage**: Activated if Qdrant goes down or approaches limits
 
-### Collection Design
+### Primary Collection Design
 ```
-Collection: ultron_passages
-├── Vectors: 1024d (Voyage)
+Collection: ultron_passages_voyage_1024
+├── Vectors: 1024d (Voyage voyage-3)
 ├── Distance: Cosine
 ├── Quantization: Scalar (int8)
 └── Payload Fields:
@@ -187,255 +223,229 @@ Collection: ultron_passages
     └── passage_index (integer)
 ```
 
-### Data Volume Estimate (English + Hindi)
-- ~100K unique passages (deduplicated from MSMARCO queries)
-- Each passage embedded at 1024d → ~4 KB per vector
-- Metadata per vector → ~1-2 KB
-- Total: ~100K × 6 KB ≈ **600 MB** (fits in Qdrant's 4 GB)
-
 ---
 
-## 5. LLM — Answer Generation
+## 6. LLM — Answer Generation
 
-### The Latency Challenge
-The task demands **<200ms** for "chunking + vector DB retrieval + everything through to final output." This is extremely aggressive. Our interpretation:
-- **Retrieval (embedding + vector search)**: ~50-100ms (achievable)
-- **LLM generation**: Even the fastest APIs (Groq) take 300-1000ms for a complete answer
-- **Strategy**: Use **streaming** to deliver first tokens within 200ms. Report P50/P70/P100 for both Time-to-First-Token (TTFT) and total completion time.
+### Latency Strategy & Requirement Clarification
 
-### Provider Cascade (6 providers for resilience)
+The task specifies an end-to-end latency target (<200ms). In cloud-hosted API pipelines with free tiers:
+- **Retrieval Latency** (Query embedding + vector search + filtering) is within direct optimization control and targeted at **<100ms**.
+- **Time to First Token (TTFT)** is targeted at **<200ms** via high-speed LPUs (Groq) and streaming responses.
+- **Full End-to-End Generation & Audio Playback** depend on network transport, token length, and audio synthesis, and are measured and reported honestly.
+- **IMPORTANT**: TTFT is an optimization metric for perceived responsiveness, NOT a claim of literal compliance with full audio completion in <200ms. All metrics are benchmarked and reported transparently.
 
-| Priority | Provider | Model | Latency (TTFT) | RPM | Free Limits | Why |
-|----------|----------|-------|-----------------|-----|-------------|-----|
-| 1 | **Groq** | `llama-3.3-70b-versatile` | ~100-200ms | 30 | 14.4K RPD | Fastest inference (LPU), best for latency |
-| 2 | **Cerebras** | `llama-3.3-70b` | ~100-300ms | 30 | 1M tokens/day | Ultra-fast, generous daily quota |
-| 3 | **SambaNova** | `Meta-Llama-3.3-70B-Instruct` | ~200-500ms | 240 | 48K RPD, 20M TPD | Highest RPM, most generous limits |
-| 4 | **Google Gemini** | `gemini-2.5-flash` | ~200-500ms | 15 | 1,500 RPD | 1M context, structured output, reliable |
-| 5 | **Together AI** | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | ~300-700ms | 60 | $5 credit | Good fallback |
-| 6 | **OpenRouter** | `deepseek/deepseek-r1:free` | ~500ms+ | 20 | 50 RPD | Last-resort fallback |
+### Canonical Provider Configuration
 
-> **Note on Llama 4 / Gemini 3.7**: While newer models like `llama-4-scout`, `gemini-3.7-flash`, and `qwen-qwq-32b` are available on some providers, we use **Llama 3.3 70B** as the primary across providers for consistency — it's the most widely available, well-tested, and reliably fast model on all 6 platforms. We can upgrade per-provider if a newer model proves faster/better during testing.
+All providers are used in **sequential failover order**, NOT called simultaneously for normal requests.
 
-### Failover Logic
+#### Core Providers (Always Configured & Tested)
+| Priority | Provider | Model Name | Format | TTFT (P50) | Free Limits |
+|:---:|---|---|---|---|---|
+| **1 (Primary)** | **Groq** | `llama-3.3-70b-versatile` | OpenAI-compatible | ~120-180ms | 30 RPM, 14.4k RPD |
+| **2 (Backup 1)** | **Cerebras** | `llama-3.3-70b` | OpenAI-compatible | ~150-250ms | 30 RPM, 1M tokens/day |
+| **3 (Backup 2)** | **Google Gemini** | `gemini-2.5-flash` | Google GenAI SDK | ~250-450ms | 15 RPM, 1,500 RPD |
+
+#### Stretch Providers (Integrated if Time Permits)
+| Priority | Provider | Model Name | Format | Free Limits |
+|:---:|---|---|---|---|
+| **4 (Stretch)** | **SambaNova** | `Meta-Llama-3.3-70B-Instruct` | OpenAI-compatible | 240 RPM, 48k RPD |
+| **5 (Stretch)** | **Together AI** | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | OpenAI-compatible | $5 signup credits |
+| **6 (Stretch)** | **OpenRouter** | `google/gemini-2.5-flash:free` | OpenAI-compatible | 20 RPM, 50 RPD |
+
+### Failover Execution Flow
 ```python
-providers = [groq, cerebras, sambanova, gemini, together, openrouter]
-for provider in providers:
+core_providers = [
+    ("groq", "llama-3.3-70b-versatile"),
+    ("cerebras", "llama-3.3-70b"),
+    ("gemini", "gemini-2.5-flash")
+]
+
+for provider_name, model_id in core_providers:
     try:
-        response = await provider.generate(prompt, timeout=5.0)
+        response = await invoke_llm(provider_name, model_id, prompt, timeout=5.0)
         return response
-    except (RateLimitError, TimeoutError, APIError):
+    except (RateLimitError, TimeoutError, APIError) as e:
+        logger.warning(f"Provider {provider_name} failed: {e}. Failing over to next provider.")
         continue
-raise AllProvidersExhaustedError()
+
+raise ProviderExhaustedError("Answer generation is temporarily unavailable.")
 ```
 
-### LLM Interface (OpenAI-compatible)
-All providers support OpenAI-compatible API format. Use `litellm` or `openai` SDK with provider-specific base URLs. For Gemini, use `google-genai` SDK or its OpenAI compatibility endpoint.
-
 ---
 
-## 6. Model Harness
-
-> **Task requirement**: *"Structured orchestration around the model — tool calls, retries, structured input/output handling, error recovery."*
+## 7. Model Harness
 
 ### Harness Components
 
 #### A. Structured Input/Output (via Pydantic + Instructor)
 ```python
 class RAGQuery(BaseModel):
-    """Validated input to the RAG pipeline"""
     query_text: str
-    language: str  # detected from STT
-    original_audio_duration: float
-    
-class RAGResponse(BaseModel):
-    """Structured output from the LLM"""
-    answer: str
-    confidence: float  # 0.0 - 1.0
-    sources: list[SourceCitation]
-    is_grounded: bool
     language: str
+    original_audio_duration: float
     
 class SourceCitation(BaseModel):
     passage_text: str
     passage_id: str
     relevance_score: float
-```
 
-#### B. Retry Logic
-- Exponential backoff with jitter on API failures
-- Provider cascade (try next provider on failure)
-- Max 3 retries per provider before moving to next
-- Circuit breaker pattern: disable provider after N consecutive failures
-
-#### C. Tool Calls
-- `retrieve_passages(query, top_k, filters)` — vector search
-- `check_relevance(query, passages)` — re-rank/filter passages
-- `detect_language(text)` — language identification
-- `translate_query(text, source_lang, target_lang)` — for cross-lingual retrieval
-
-#### D. Error Recovery
-- Graceful degradation: if all LLMs fail, return top retrieved passages as-is
-- Timeout handling: 5s max per LLM call, 10s total pipeline timeout
-- Input validation: reject audio >30s, empty transcripts, etc.
-
----
-
-## 7. Guardrails
-
-> **Task requirement**: *"Handling for off-topic queries, unsafe/inappropriate inputs, hallucination checks, or answers not grounded in the retrieved context."*
-
-### Guardrail Layers
-
-#### Layer 1: Input Guardrails (Pre-Retrieval)
-- **Empty/noise detection**: Reject transcripts < 3 words or confidence < 0.3
-- **Language detection**: Ensure input is in supported languages
-- **Toxicity/safety filter**: Check for unsafe/inappropriate content via keyword matching + LLM classification
-- **Query type classification**: Identify if query is factual, opinion, or off-topic
-
-#### Layer 2: Retrieval Guardrails (Post-Retrieval)
-- **Relevance threshold**: If best passage score < 0.5 cosine similarity, flag as "low confidence"
-- **Passage diversity**: Ensure retrieved passages aren't all from same query_id
-- **No-context handling**: If no relevant passages found, return "I don't have information about this topic"
-
-#### Layer 3: Output Guardrails (Post-Generation)
-- **Grounding check**: Verify answer claims are supported by retrieved passages
-  - Use NLI (Natural Language Inference) or simple overlap scoring
-  - Flag ungrounded claims
-- **Hallucination detection**: Compare answer entities/facts against passage text
-- **Refusal triggers**: 
-  - Off-topic (not in knowledge base domain)
-  - Unsafe/harmful queries
-  - Ungrounded answers (confidence below threshold)
-- **Response format validation**: Ensure structured output matches schema
-
-### Guardrail Response Format
-```python
-class GuardrailResult(BaseModel):
-    is_safe: bool
-    is_on_topic: bool
+class RAGResponse(BaseModel):
+    answer: str
+    confidence: float  # 0.0 - 1.0
+    sources: list[SourceCitation]
     is_grounded: bool
-    confidence: float
-    refusal_reason: Optional[str]
-    warnings: list[str]
+    language: str
 ```
+
+#### B. Robust Failover & Circuit Breaker
+- Exponential backoff with jitter on transient failures.
+- Circuit breaker: Provider is temporarily disabled after 3 consecutive failures and re-probed after 60s cooldown.
+- Timeout handling: 5s per LLM call, 10s total pipeline timeout.
+
+#### C. Error Recovery
+- If all LLM providers are rate-limited or fail: Return a clean status message (*"Answer generation is temporarily unavailable."*) while safely exposing the top retrieved source passages in a collapsible UI drawer.
 
 ---
 
-## 8. Text-to-Speech (TTS)
+## 8. Guardrails
 
-### Primary: `edge-tts` (Microsoft Edge Neural Voices)
-- **Cost**: Completely free, no API key required
-- **Rate Limit**: Unlimited for development workloads
-- **Voices**: 
-  - Hindi: `hi-IN-SwaraNeural` (Female), `hi-IN-MadhurNeural` (Male)
-  - English: `en-IN-NeerjaNeural` (Female), `en-IN-PrabhatNeural` (Male)
-- **Quality**: Azure Neural voices — high naturalness
-- **Integration**: Python `edge-tts` package, async API
+### Layer 1: Input Guardrails (Pre-Retrieval, Deterministic, <5ms)
+- Empty / noise audio detection (transcripts < 3 words rejected).
+- Language support validation.
+- Toxicity / injection blocklist (regex pattern matching, zero LLM latency).
 
-### Secondary: Sarvam TTS (`bulbul:v3`)
-- **Endpoint**: `POST https://api.sarvam.ai/text-to-speech`
-- **Free Credits**: Shared ₹100 pool with STT (~33K characters)
-- **Best for**: Authentic Indian accent, Hinglish support
-- **Max per request**: 2,500 characters
+### Layer 2: Retrieval Guardrails (Post-Retrieval, Deterministic, <5ms)
+- Relevance threshold: If top passage cosine similarity < 0.40 → return polite out-of-domain response.
+- Source diversity check: Prevent all passages from originating from a single duplicated query ID.
 
-### Tertiary: ElevenLabs (Multilingual v3)
-- **Free Tier**: 10,000 credits/month (shared with STT Scribe)
-- **Languages**: Hindi, Bengali, Tamil, Telugu + 70 more
-- **Quality**: Best emotional expressiveness
-- **Limitation**: Very small free quota, save for demos
+### Layer 3: Two-Tier Output Grounding Check
 
-### TTS Strategy
-- Use `edge-tts` for all general TTS (unlimited, good quality)
-- Use Sarvam TTS for showcase/demo (better Indian accent)
-- ElevenLabs reserved for polished demo recordings only
+```
+Generated Answer + Context Passages
+                 │
+                 ▼
+┌────────────────────────────────────────────────────────┐
+│ Tier 1: Deterministic Suspicion Check (<5ms)           │
+│ - Validate citation tags exist in retrieved passages   │
+│ - Check named entity presence in cited passages        │
+│ - Match key noun phrases / factual numbers             │
+└────────────────────────┬───────────────────────────────┘
+                         │
+        ┌────────────────┴────────────────┐
+        ▼                                 ▼
+[Clear Verdict]                  [Ambiguous / Suspicious]
+(High match & valid citations)   (Mismatch in numbers/entities)
+        │                                 │
+        ▼                                 ▼
+ Mark GROUNDED or UNGROUNDED     ┌────────────────────────────────┐
+                                 │ Tier 2: LLM Verifier (~10%)    │
+                                 │ Fast verification prompt       │
+                                 └────────────────────────────────┘
+```
+
+> **Design rule**: Token overlap alone is NOT treated as proof of factual grounding (it is merely a heuristic filter). Only ambiguous cases trigger a Tier 2 LLM verifier, preserving low latency for the fast path.
 
 ---
 
-## 9. Latency Analytics
+## 9. Text-to-Speech (TTS)
 
-### Measurement Points
-```
-T0: Audio received
-T1: STT complete (transcript ready)
-T2: Query processed (embedding generated)
-T3: Vector search complete (passages retrieved)
-T4: LLM first token generated
-T5: LLM complete (full answer)
-T6: TTS complete (audio generated)
+### Primary: `edge-tts` (Unlimited Free, Async)
+- Hindi: `hi-IN-SwaraNeural` (Female), `hi-IN-MadhurNeural` (Male)
+- English: `en-IN-NeerjaNeural` (Female), `en-IN-PrabhatNeural` (Male)
+- High naturalness, zero API key requirement, async execution.
 
-Metrics:
-- STT Latency: T1 - T0
-- Retrieval Latency: T3 - T1  (this is what the task targets at <200ms)
-- Generation TTFT: T4 - T3
-- Generation Total: T5 - T3
-- TTS Latency: T6 - T5
-- End-to-End: T6 - T0
-```
+### Backup: Sarvam TTS (`bulbul:v3`)
+- Native Indic intonation, used for Hindi showcase.
 
-### Reporting
-- Run **100+ test queries** from the MSMARCO-XI validation set
-- Report **P50 / P70 / P100** for each metric
-- Display analytics dashboard in the Gradio UI
-- Log all latency data to a CSV for analysis
-
-### Latency Optimization
-- **Embedding caching**: Cache query embeddings for repeated/similar queries
-- **Connection pooling**: Keep persistent connections to vector DB
-- **Async pipeline**: STT → embedding and retrieval in parallel where possible
-- **Streaming LLM**: Start speaking TTS before full answer is generated
+### Tertiary: ElevenLabs (`eleven_multilingual_v2`)
+- Reserved for final video presentation and demo polish.
 
 ---
 
-## 10. Deployment
+## 10. Latency Analytics & Benchmark Structure
+
+### Granular Measurement Stages
+```
+T0: Audio received at server
+T1: STT transcript ready
+T2: Input guardrail validation complete
+T3: Query embedding vector generated
+T4: Qdrant vector search complete
+T5: Retrieval guardrails & reranking complete
+T6: LLM Time to First Token (TTFT)
+T7: Full LLM text generation complete
+T8: Output grounding check complete
+T9: TTS audio generation complete
+
+Separately Reported Metrics:
+1. Retrieval Latency: T5 - T2 (Target: <100ms)
+2. LLM TTFT: T6 - T5 (Target: <200ms)
+3. Full LLM Generation: T7 - T5
+4. Post-STT End-to-End: T8 - T1 (Query text to validated answer)
+5. Full Pipeline End-to-End: T9 - T0 (Audio in to audio ready)
+```
+
+### Dataset Split & Leakage Prevention
+- MSMARCO-XI (`hi`) provides `train` split data.
+- **Split Verification**: If a dedicated `validation` split is not available on Hugging Face, a **deterministic held-out evaluation set** is created by hashing `query_id` with a fixed seed (e.g. 50 dev queries for tuning, 100 test queries for final benchmarks).
+- **Leakage Prevention**: All passages and queries belonging to the dev and test sets are strictly removed from the indexing corpus before generating production embeddings.
+
+---
+
+## 11. Deployment
 
 ### Platform: Hugging Face Spaces (Gradio SDK)
 - **URL**: `https://huggingface.co/spaces/<team>/ultron-v`
-- **SDK**: Gradio
-- **Hardware**: Free CPU (2 vCPU, 16 GB RAM)
-- **Always-on**: Yes (no cold starts)
-- **Secrets**: Store API keys as HF Space secrets
+- **Hardware**: Free Tier CPU (2 vCPU, 16 GB RAM)
+- **Always-on**: Zero cold start.
+- **Data independence**: Deployment does not host raw 55GB dataset files; it connects directly to Qdrant Cloud.
 
-### No Local Dataset Needed for Deployment
-The deployment does **not** require the MSMARCO-XI dataset. All passages are pre-embedded and stored in the vector database (Qdrant/Pinecone). The deployed app only needs API keys to access external services.
-
-### Environment Variables
+### Environment Variables (.env)
 ```env
-# STT
-SARVAM_API_KEY=xxx
-ELEVENLABS_API_KEY=xxx
+# === STT ===
+SARVAM_API_KEY=
+ELEVENLABS_API_KEY=
 
-# LLM Providers
-GROQ_API_KEY=xxx
-CEREBRAS_API_KEY=xxx
-SAMBANOVA_API_KEY=xxx
-GOOGLE_API_KEY=xxx
-TOGETHER_API_KEY=xxx
-OPENROUTER_API_KEY=xxx
+# === Core LLM Providers ===
+GROQ_API_KEY=
+CEREBRAS_API_KEY=
+GOOGLE_API_KEY=
 
-# Embeddings
-VOYAGE_API_KEY=xxx
-JINA_API_KEY=xxx
+# === Stretch LLM Providers ===
+SAMBANOVA_API_KEY=
+TOGETHER_API_KEY=
+OPENROUTER_API_KEY=
 
-# Vector DB
-QDRANT_URL=xxx
-QDRANT_API_KEY=xxx
-PINECONE_API_KEY=xxx
-PINECONE_INDEX_HOST=xxx
+# === Embeddings ===
+VOYAGE_API_KEY=
+
+# === Vector DB ===
+QDRANT_URL=
+QDRANT_API_KEY=
+PINECONE_API_KEY=
+PINECONE_INDEX_HOST=
+
+# === Deployment ===
+HF_TOKEN=
 ```
 
 ---
 
-## 11. Tech Stack Summary
+## 12. Tech Stack Summary
 
-| Component | Technology | Free Tier |
-|-----------|-----------|-----------|
-| **Language** | Python 3.11+ | — |
-| **Framework** | FastAPI (backend logic) + Gradio (UI) | — |
-| **STT** | Sarvam AI `saaras:v3` + ElevenLabs `scribe_v2` backup | ₹100 credits + 10K credits |
-| **Embedding** | Voyage AI `voyage-3` + Gemini `gemini-embedding-001` backup | 200M tokens + unlimited |
-| **Vector DB** | Qdrant Cloud + Pinecone backup | 4GB + 2GB |
-| **LLM** | Groq → Cerebras → SambaNova → Gemini → Together → OpenRouter | All free |
-| **TTS** | `edge-tts` + Sarvam + ElevenLabs | Unlimited + ₹100 + 10K credits |
-| **Deployment** | Hugging Face Spaces | Free |
-| **Orchestration** | LiteLLM (provider routing) + Instructor (structured output) | — |
-| **Guardrails** | Custom (Pydantic validation + LLM-based checks) | — |
+| Component | Technology | Canonical Model / Details |
+|---|---|---|
+| **STT Primary** | Sarvam AI | `saaras:v3` |
+| **STT Backup** | ElevenLabs | `scribe_v2` |
+| **Embedding Primary** | Voyage AI | `voyage-3` (1024d) |
+| **Embedding Backup** | Google Gemini | `gemini-embedding-001` (768d, separate collection) |
+| **Vector DB Primary** | Qdrant Cloud | Collection `ultron_passages_voyage_1024` |
+| **Vector DB Backup** | Pinecone Serverless | Cosine index (1024d) |
+| **LLM Core 1** | Groq | `llama-3.3-70b-versatile` |
+| **LLM Core 2** | Cerebras | `llama-3.3-70b` |
+| **LLM Core 3** | Google Gemini | `gemini-2.5-flash` |
+| **LLM Stretch** | SambaNova / Together / OpenRouter | `Meta-Llama-3.3-70B-Instruct` / Turbo / Flash |
+| **TTS Primary** | `edge-tts` | `hi-IN-SwaraNeural` / `en-IN-NeerjaNeural` |
+| **TTS Backup** | Sarvam AI | `bulbul:v3` |
+| **UI & Hosting** | Gradio | Hugging Face Spaces |

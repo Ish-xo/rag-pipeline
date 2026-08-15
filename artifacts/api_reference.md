@@ -83,29 +83,33 @@
 
 ## 2. LLM Providers
 
+> **Core 3** providers are always integrated. **Stretch** providers are added if time permits.
+
+### CORE PROVIDERS
+
 ### 2.1 Groq (PRIMARY)
 
 | Detail | Value |
 |--------|-------|
 | **Base URL** | `https://api.groq.com/openai/v1` |
-| **Model** | `llama-4-scout-17b-16e-instruct` |
-| **Alt Models** | `llama-3.3-70b-versatile`, `qwen-qwq-32b`, `deepseek-r1-distill-llama-70b` |
-| **Context Window** | 128,000 tokens (Scout: 131,072) |
-| **Rate Limit** | 30 RPM, 7K-30K TPM, 1,000-14,400 RPD |
+| **Model** | `llama-3.3-70b-versatile` |
+| **Alt Models** | `llama-4-scout-17b-16e-instruct`, `qwen-qwq-32b` |
+| **Context Window** | 128,000 tokens (max completion: 32,768) |
+| **Rate Limit** | 30 RPM, 12K-30K TPM, 1,000-14,400 RPD |
 | **Auth** | `Authorization: Bearer <GROQ_API_KEY>` |
 | **API Format** | OpenAI-compatible |
 | **Signup** | https://console.groq.com |
 | **Latency** | ~100-200ms TTFT (LPU hardware) |
 
-**LiteLLM Model String:** `groq/llama-4-scout-17b-16e-instruct`
+**LiteLLM Model String:** `groq/llama-3.3-70b-versatile`
 
 ### 2.2 Cerebras (BACKUP 1)
 
 | Detail | Value |
 |--------|-------|
 | **Base URL** | `https://api.cerebras.ai/v1` |
-| **Model** | `llama-4-scout-17b-16e` |
-| **Alt Models** | `llama-3.3-70b`, `qwen-3-32b` |
+| **Model** | `llama-3.3-70b` |
+| **Alt Models** | `llama-4-scout-17b-16e`, `qwen-3-32b` |
 | **Context Window** | 128,000 tokens |
 | **Max Completion** | 8,192 tokens |
 | **Rate Limit** | 30 RPM, 60K TPM, 1M tokens/day |
@@ -114,24 +118,9 @@
 | **Signup** | https://cloud.cerebras.ai |
 | **Latency** | ~100-300ms TTFT |
 
-**LiteLLM Model String:** `cerebras/llama-4-scout-17b-16e`
+**LiteLLM Model String:** `cerebras/llama-3.3-70b`
 
-### 2.3 SambaNova (BACKUP 2)
-
-| Detail | Value |
-|--------|-------|
-| **Base URL** | `https://api.sambanova.ai/v1` |
-| **Model** | `Llama-4-Maverick-17B-128E-Instruct` |
-| **Alt Models** | `Llama-4-Scout-17B-16E-Instruct`, `DeepSeek-R1`, `QwQ-32B` |
-| **Context Window** | 64K-128K tokens |
-| **Rate Limit** | 240 RPM, 48,000 RPD |
-| **Auth** | `Authorization: Bearer <SAMBANOVA_API_KEY>` |
-| **API Format** | OpenAI-compatible |
-| **Signup** | https://cloud.sambanova.ai |
-
-**LiteLLM Model String:** `sambanova/Llama-4-Maverick-17B-128E-Instruct`
-
-### 2.4 Google Gemini (BACKUP 3)
+### 2.3 Google Gemini (BACKUP 2)
 
 | Detail | Value |
 |--------|-------|
@@ -146,12 +135,31 @@
 
 **LiteLLM Model String:** `gemini/gemini-2.5-flash`
 
-### 2.5 Together AI (BACKUP 4)
+---
+
+### STRETCH PROVIDERS (add if time permits)
+
+### 2.4 SambaNova (STRETCH)
+
+| Detail | Value |
+|--------|-------|
+| **Base URL** | `https://api.sambanova.ai/v1` |
+| **Model** | `Meta-Llama-3.3-70B-Instruct` |
+| **Alt Models** | `DeepSeek-R1`, `QwQ-32B` |
+| **Context Window** | 128,000 tokens |
+| **Rate Limit** | 240 RPM, 48,000 RPD |
+| **Auth** | `Authorization: Bearer <SAMBANOVA_API_KEY>` |
+| **API Format** | OpenAI-compatible |
+| **Signup** | https://cloud.sambanova.ai |
+
+**LiteLLM Model String:** `sambanova/Meta-Llama-3.3-70B-Instruct`
+
+### 2.5 Together AI (STRETCH)
 
 | Detail | Value |
 |--------|-------|
 | **Base URL** | `https://api.together.ai/v1` |
-| **Model** | `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8` |
+| **Model** | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
 | **Alt Models** | `deepseek-ai/DeepSeek-R1-Distill-Llama-70B-Free` |
 | **Context Window** | 128,000 tokens |
 | **Rate Limit** | ~60 RPM (dynamic) |
@@ -160,15 +168,15 @@
 | **Free Credit** | $5 on signup |
 | **Signup** | https://api.together.ai |
 
-**LiteLLM Model String:** `together_ai/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8`
+**LiteLLM Model String:** `together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo`
 
-### 2.6 OpenRouter (BACKUP 5 — Last Resort)
+### 2.6 OpenRouter (STRETCH — Last Resort)
 
 | Detail | Value |
 |--------|-------|
 | **Base URL** | `https://openrouter.ai/api/v1` |
 | **Model** | `google/gemini-2.5-flash:free` |
-| **Alt Models** | `meta-llama/llama-4-scout:free`, `qwen/qwen-3-32b:free` |
+| **Alt Models** | `meta-llama/llama-3.3-70b-instruct:free`, `qwen/qwen-3-32b:free` |
 | **Rate Limit** | 20 RPM, 50 RPD (unfunded) |
 | **Auth** | `Authorization: Bearer <OPENROUTER_API_KEY>` |
 | **API Format** | OpenAI-compatible |
@@ -185,7 +193,7 @@
 | Detail | Value |
 |--------|-------|
 | **Endpoint** | `POST https://api.voyageai.com/v1/embeddings` |
-| **Model** | `voyage-3` (or `voyage-3-large` for highest quality) |
+| **Model** | `voyage-3` |
 | **Dimensions** | 1024 |
 | **Context** | 32,000 tokens |
 | **Free Quota** | 200M tokens on signup |
@@ -208,21 +216,21 @@ result = vo.embed(texts=["query text"], model="voyage-3", input_type="query")
 | Detail | Value |
 |--------|-------|
 | **Model** | `gemini-embedding-001` |
-| **Dimensions** | 768 (supports MRL truncation to 256/512) |
+| **Dimensions** | 768 |
 | **Free Quota** | Unlimited (free tier) |
 | **Rate Limit** | 1,500 RPM |
 | **Context** | 2,048 tokens |
 | **SDK** | `pip install google-genai` |
 
-> ⚠️ **Note**: `text-embedding-004` was deprecated and shut down on Jan 14, 2026. Use `gemini-embedding-001` or `gemini-embedding-2` instead.
+> ⚠️ **Critical Architecture Constraint**: `gemini-embedding-001` generates 768-dimensional vectors. It MUST query a separate `ultron_passages_gemini_768` collection and CANNOT query the primary 1024d Voyage collection. Never pad, truncate, or resize vectors across dimensions.
 
-### 3.3 Jina AI Embedding (BACKUP 2)
+### 3.3 Jina AI Embedding (BACKUP 2 — STRETCH)
 
 | Detail | Value |
 |--------|-------|
 | **Endpoint** | `POST https://api.jina.ai/v1/embeddings` |
 | **Model** | `jina-embeddings-v4` |
-| **Dimensions** | 1024 (Matryoshka: 256-768) |
+| **Dimensions** | 1024 (native match with primary collection) |
 | **Context** | 32,000 tokens |
 | **Free Quota** | 10M tokens on signup |
 | **Rate Limit** | 100 RPM, 100K TPM |
@@ -239,6 +247,8 @@ result = vo.embed(texts=["query text"], model="voyage-3", input_type="query")
 |--------|-------|
 | **Dashboard** | https://cloud.qdrant.io |
 | **Free Tier** | 4 GB disk, 1 GB RAM, 0.5 vCPU |
+| **Primary Collection** | `ultron_passages_voyage_1024` (1024d, Cosine) |
+| **Fallback Collection** | `ultron_passages_gemini_768` (768d, Cosine) — optional |
 | **Max Vectors** | ~500K at 1024d (uncompressed), ~1M with SQ |
 | **SDK** | `pip install qdrant-client` |
 | **Inactivity** | Suspended after 7 days, deleted after 4 weeks |

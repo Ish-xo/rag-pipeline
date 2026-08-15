@@ -67,7 +67,7 @@ No resubmissions allowed — submit only when the build is final.
 | English | `en` | (Original MSMARCO) | Primary |
 | Hindi | `hi` | `ai4bharat/MSMARCO-XI` | Primary |
 
-> We index **English passages** for retrieval (better embedding quality) and store **Hindi translations as metadata** for bilingual answer generation.
+> We run an **indexing language experiment** (English vs Hindi vs both) to empirically determine the best configuration for retrieval quality. Both English and Hindi passages are stored as metadata for bilingual answer generation.
 
 ---
 
@@ -75,7 +75,7 @@ No resubmissions allowed — submit only when the build is final.
 
 Everything runs on **free tiers only**. No paid APIs. No credit card required for any service. Multiple backup providers at every layer to avoid rate limiting:
 - **STT**: Sarvam AI (primary) + ElevenLabs Scribe (backup)
-- **LLM**: 6-provider cascade (Groq → Cerebras → SambaNova → Gemini → Together → OpenRouter)
-- **Embeddings**: Voyage AI (primary) + Gemini (backup) + Jina AI (backup)
+- **LLM**: Sequential failover — Core: Groq → Cerebras → Gemini. Stretch (if time): SambaNova → Together AI → OpenRouter
+- **Embeddings**: Voyage AI `voyage-3` (primary, 1024d). Gemini `gemini-embedding-001` fallback requires its own 768d collection.
 - **Vector DB**: Qdrant Cloud (primary) + Pinecone (backup)
 - **TTS**: edge-tts (primary, unlimited) + Sarvam (secondary) + ElevenLabs (tertiary)
