@@ -155,21 +155,21 @@ The architecture is strictly decoupled using modular contracts (`base.py`, Pydan
 ## Phase 4: Voice Integration (STT & TTS) & Gradio UI (Member 3 — Frontend Lead)
 
 ### 4.1 Speech-to-Text (STT)
-- [ ] Sarvam AI `saaras:v3` primary client (supports Hindi, English, Hinglish, verbatim, and translate modes).
-- [ ] ElevenLabs `scribe_v2` backup client with automatic failover.
-- [ ] Fallback to direct text input if audio input is corrupted or APIs are unreachable.
+- [x] Sarvam AI `saaras:v3` primary client (supports Hindi, English, Hinglish, verbatim, and translate modes).
+- [x] ElevenLabs `scribe_v2` backup client with automatic failover.
+- [x] Fallback to direct text input if audio input is corrupted or APIs are unreachable.
 
 ### 4.2 Text-to-Speech (TTS)
-- [ ] `edge-tts` async primary client (zero API key required, neural Hindi & English voices).
-- [ ] Sarvam AI `bulbul:v3` backup client for native Indic pitch/prosody.
-- [ ] ElevenLabs `eleven_multilingual_v2` for demo polish.
+- [x] `edge-tts` async primary client (zero API key required, neural Hindi & English voices).
+- [x] Sarvam AI `bulbul:v3` backup client for native Indic pitch/prosody.
+- [x] ElevenLabs `eleven_multilingual_v2` for demo polish.
 
 ### 4.3 Gradio Application (`app.py`)
-- [ ] Ultron dark aesthetic (dark metallic canvas, crimson/red accents, monospace data metrics).
-- [ ] Audio recorder with live waveform + text input box.
-- [ ] Structured response display: Streamed answer text, confidence badge, collapsible source citations, synthesized audio player.
-- [ ] Mode switch toggle: Fast Path (Latency-First) vs Quality Path (Ensemble).
-- [ ] Real-time latency waterfall breakdown displaying per-stage timings.
+- [x] Ultron dark aesthetic (dark metallic canvas, crimson/red accents, monospace data metrics).
+- [x] Audio recorder with live waveform + text input box.
+- [x] Structured response display: Streamed answer text, confidence badge, collapsible source citations, synthesized audio player.
+- [x] Mode switch toggle: Fast Path (Latency-First) vs Quality Path (Ensemble).
+- [x] Real-time latency waterfall breakdown displaying per-stage timings.
 
 ---
 
