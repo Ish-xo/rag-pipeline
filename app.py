@@ -151,16 +151,36 @@ async def process_interaction(audio_filepath, text_input, mode):
     timer.record("T9") # TTS complete
     
     waterfall = timer.get_waterfall()
-    waterfall_str = "\n".join([f"{k}: {v:.1f}ms" for k, v in waterfall.items()])
+    
+    # Defined Max Budgets (in milliseconds)
+    targets = {
+        "T0 -> T1": 400.0,   # Speech-to-Text (Streaming/Fast API)
+        "T1 -> T2": 5.0,     # Input Guardrails (Sub-5ms goal)
+        "T2 -> T3": 20.0,    # Embedding (Fast API/Local)
+        "T3 -> T4": 30.0,    # Vector Search (Part of 50ms retrieval budget)
+        "T4 -> T5": 10.0,    # Reranking / Retrieval Guardrails
+        "T5 -> T6": 300.0,   # LLM TTFT (Time To First Token)
+        "T6 -> T7": 1500.0,  # LLM Full Generation
+        "T7 -> T8": 50.0,    # Output Guardrails (Tier 1 fast check)
+        "T8 -> T9": 400.0    # Text-to-Speech (Streaming/Fast API)
+    }
+    
+    waterfall_lines = []
+    for k, v in waterfall.items():
+        target = targets.get(k, 9999.0)
+        status = "✅" if v <= target else "⚠️" if v <= target * 2 else "❌"
+        waterfall_lines.append(f"{k}: {v:.1f}ms (Budget: <{target}ms) {status}")
+        
+    waterfall_str = "\n".join(waterfall_lines)
     
     retrieval_lat = timer.get_latency("T2", "T5")
     e2e_lat = timer.get_latency("T1", "T8")
     
-    metrics = f"[TIME STONE SYNC]\nRetrieval Latency: {retrieval_lat:.1f}ms\nPost-STT Latency: {e2e_lat:.1f}ms\n\nWaterfall Diagnostics:\n{waterfall_str}"
+    metrics = f"[TIME STONE SYNC]\nRetrieval Latency: {retrieval_lat:.1f}ms (Budget: <60ms)\nPost-STT Latency: {e2e_lat:.1f}ms\n\nWaterfall Diagnostics:\n{waterfall_str}"
     
     return answer, citations_str, metrics, audio_output
 
-# Define Custom Infinity Ultron Gradio Theme
+# Define Custom Infinity Ultron Gradio Theme (Light Mode)
 theme = gr.themes.Base(
     primary_hue=gr.themes.colors.amber,
     secondary_hue=gr.themes.colors.purple,
@@ -169,45 +189,45 @@ theme = gr.themes.Base(
 ).set(
     body_background_fill_dark="#0A0A0C",
     body_text_color_dark="#A8A9AD",
-    body_background_fill="#0A0A0C",
-    body_text_color="#A8A9AD",
+    body_background_fill="#F4F4F5",
+    body_text_color="#18181B",
     
     block_background_fill_dark="#1E1E24",
     block_border_width="1px",
     block_border_color_dark="#3F3F46",
     block_title_text_color_dark="#FFC72C",
-    block_background_fill="#1E1E24",
-    block_border_color="#3F3F46",
-    block_title_text_color="#FFC72C",
+    block_background_fill="#FFFFFF",
+    block_border_color="#E4E4E7",
+    block_title_text_color="#D97706",
     
     input_background_fill_dark="#121215",
     input_border_color_dark="#00D2FF",
-    input_background_fill="#121215",
-    input_border_color="#00D2FF",
+    input_background_fill="#F9FAFB",
+    input_border_color="#0284C7",
 )
 
 custom_css = """
 /* HUD and Glow Effects */
 body {
-    background: radial-gradient(circle at center, #1E1E24 0%, #0A0A0C 100%) !important;
+    background: radial-gradient(circle at center, #FFFFFF 0%, #F4F4F5 100%) !important;
 }
 .gradio-container {
-    box-shadow: inset 0 0 100px rgba(138, 43, 226, 0.1) !important;
+    box-shadow: inset 0 0 100px rgba(138, 43, 226, 0.05) !important;
 }
 .gr-box, .gr-panel, div[class*="svelte-"] {
     border-radius: 0px !important;
 }
 /* Wrap inputs in chamfered borders */
 .gr-box, .gr-form {
-    background: rgba(18, 18, 21, 0.8) !important;
+    background: rgba(255, 255, 255, 0.8) !important;
     backdrop-filter: blur(10px) !important;
-    border: 1px solid rgba(138, 43, 226, 0.4) !important; /* Power Stone Purple */
+    border: 1px solid rgba(138, 43, 226, 0.2) !important; /* Power Stone Purple */
     clip-path: polygon(10px 0, 10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px) !important;
-    box-shadow: 0 0 15px rgba(138, 43, 226, 0.1), inset 0 0 15px rgba(138, 43, 226, 0.1) !important;
+    box-shadow: 0 0 15px rgba(138, 43, 226, 0.05), inset 0 0 15px rgba(138, 43, 226, 0.05) !important;
     transition: all 0.3s ease-in-out !important;
 }
 .gr-box:hover, .gr-form:focus-within {
-    box-shadow: 0 0 20px rgba(0, 210, 255, 0.4), inset 0 0 20px rgba(0, 210, 255, 0.2) !important; /* Space Stone Blue */
+    box-shadow: 0 0 20px rgba(0, 210, 255, 0.2), inset 0 0 20px rgba(0, 210, 255, 0.1) !important; /* Space Stone Blue */
     border-color: rgba(0, 210, 255, 0.8) !important;
 }
 
