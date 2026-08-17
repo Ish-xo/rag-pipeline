@@ -129,23 +129,23 @@ The architecture is strictly decoupled using modular contracts (`base.py`, Pydan
 - [ ] Reranker & Diversity Filter: Deduplicate passages sharing the same parent query ID.
 
 ### 3.2 Sequential LLM Failover Cascade
-- [ ] Core Sequential Cascade:
+- [x] Core Sequential Cascade:
   1. **Groq** (`llama-3.3-70b-versatile`) — Primary low-latency generation.
   2. **Cerebras** (`llama-3.3-70b`) — Backup generation.
   3. **Google Gemini** (`gemini-2.5-flash`) — Emergency fallback.
-- [ ] Stretch Providers (if time permits): SambaNova (`Meta-Llama-3.3-70B-Instruct`), Together AI (`meta-llama/Llama-3.3-70B-Instruct-Turbo`), OpenRouter (`google/gemini-2.5-flash:free`).
-- [ ] Streaming interface enabled to minimize Time to First Token (TTFT).
+- [x] Stretch Providers (if time permits): SambaNova (`Meta-Llama-3.3-70B-Instruct`), Together AI (`meta-llama/Llama-3.3-70B-Instruct-Turbo`), OpenRouter (`google/gemini-2.5-flash:free`).
+- [x] Streaming interface enabled to minimize Time to First Token (TTFT).
 
 ### 3.3 Model Harness & Resilience
-- [ ] Pydantic / Instructor structured I/O validation (`RAGQuery`, `RAGResponse`, `SourceCitation`).
-- [ ] Exponential backoff with jitter on HTTP 429/500 errors.
-- [ ] Circuit breaker: Temporarily mute any provider encountering 3 consecutive errors (60s cooldown).
-- [ ] Graceful Degradation: If all LLMs fail, return status message (*"Answer generation is temporarily unavailable."*) and expose retrieved sources in a collapsible UI drawer.
+- [x] Pydantic / Instructor structured I/O validation (`RAGQuery`, `RAGResponse`, `SourceCitation`).
+- [x] Exponential backoff with jitter on HTTP 429/500 errors.
+- [x] Circuit breaker: Temporarily mute any provider encountering 3 consecutive errors (60s cooldown).
+- [x] Graceful Degradation: If all LLMs fail, return status message (*"Answer generation is temporarily unavailable."*) and expose retrieved sources in a collapsible UI drawer.
 
 ### 3.4 Two-Tier Grounding & Safety Guardrails
-- [ ] **Input Guardrails (<5ms)**: Empty/noise audio filter (<3 words), language verification, regex injection/toxicity blocklist.
-- [ ] **Retrieval Guardrails (<5ms)**: Cosine similarity cutoff (<0.40 → out-of-domain refusal), source diversity validation.
-- [ ] **Output Grounding**:
+- [x] **Input Guardrails (<5ms)**: Empty/noise audio filter (<3 words), language verification, regex injection/toxicity blocklist.
+- [x] **Retrieval Guardrails (<5ms)**: Cosine similarity cutoff (<0.40 → out-of-domain refusal), source diversity validation.
+- [x] **Output Grounding**:
   - **Tier 1 (Deterministic, <5ms)**: Verify citation IDs correspond to retrieved passages; match named entities and key noun phrases.
   - **Tier 2 (LLM Verifier, ~10% of cases)**: Trigger fast verification prompt only when Tier 1 detects ambiguous entity or factual discrepancies.
   - *Token overlap alone is never treated as proof of factual accuracy.*
