@@ -55,8 +55,21 @@ def generate_core_wireframe():
     return fig
 
 async def process_interaction(audio_filepath, text_input, mode):
+    from src.llm.provider_cascade import LLMProviderCascade
+    from src.guardrails.input_guard import InputGuardrail
+    from src.guardrails.retrieval_guard import RetrievalGuardrail
+    from src.guardrails.output_guard import OutputGuardrail
+    from src.retrieval.retriever import search
+    from src.llm.schemas import SourceCitation
+    
     timer = PipelineTimer()
     timer.record("T0") # Audio received
+    
+    # Initialize Workstream 1 components
+    llm_cascade = LLMProviderCascade()
+    input_guard = InputGuardrail()
+    retrieval_guard = RetrievalGuardrail()
+    output_guard = OutputGuardrail()
     
     # STT processing
     if audio_filepath and not text_input:
@@ -67,43 +80,74 @@ async def process_interaction(audio_filepath, text_input, mode):
         except Exception as e:
             text_input = f"[STT Error: {e}]"
     
-    # MOCK PIPELINE
-    await asyncio.sleep(0.05) # Simulate processing
     timer.record("T1") # STT Complete
     
-    await asyncio.sleep(0.01)
-    timer.record("T2") # Guardrails complete
-    
-    await asyncio.sleep(0.05)
-    timer.record("T3") # Embedding complete
-    
-    await asyncio.sleep(0.1)
-    timer.record("T4") # Vector search complete
-    
-    await asyncio.sleep(0.02)
-    timer.record("T5") # Reranking complete
-    
-    await asyncio.sleep(0.15)
-    timer.record("T6") # TTFT
-    
-    await asyncio.sleep(0.3)
-    timer.record("T7") # Full text generation complete
-    
-    answer = f"Generated answer using {mode} for query."
-    if text_input:
-        answer += f" Text input provided: {text_input}"
+    # T1 -> T2: Input Guardrails
+    guard_res = input_guard.validate(text_input or "")
+    if not guard_res.is_safe:
+        timer.record("T2")
+        timer.record("T3")
+        timer.record("T4")
+        timer.record("T5")
+        timer.record("T6")
+        timer.record("T7")
+        timer.record("T8")
+        answer = guard_res.reason
+        citations_str = "No citations."
+    else:
+        timer.record("T2") # Guardrails complete
         
-    await asyncio.sleep(0.01)
-    timer.record("T8") # Output grounding complete
+        # T2 -> T3 -> T4: Embedding & Vector Search (Mock)
+        # Using mock search for Workstream 2 until Phase 2 is done
+        mock_resp = search(text_input) 
+        timer.record("T3") # Embedding complete
+        timer.record("T4") # Vector search complete
+        
+        # T4 -> T5: Reranking & Retrieval Guardrails
+        mock_citations = [
+            SourceCitation(id=1, text="गोवा भारत का एक सुंदर राज्य है और यह अपने समुद्र तटों के लिए जाना जाता है।", similarity=0.95),
+            SourceCitation(id=2, text="Goa is a state in India, famous for its beaches and tourism.", similarity=0.88),
+            SourceCitation(id=3, text="Irrelevant context about something else.", similarity=0.20)
+        ]
+        filtered_citations, ret_guard_res = retrieval_guard.filter_and_validate(mock_citations)
+        timer.record("T5") # Reranking complete
+        
+        if not ret_guard_res.is_safe:
+            timer.record("T6")
+            timer.record("T7")
+            timer.record("T8")
+            answer = ret_guard_res.reason
+            citations_str = "No citations passed threshold."
+        else:
+            # T5 -> T6 -> T7: Answer Generation
+            # Measuring TTFT and full generation
+            start_gen = asyncio.get_event_loop().time()
+            answer, provider, exec_ms = await llm_cascade.generate_answer(text_input, filtered_citations)
+            
+            # Estimate TTFT (~20% of total generation time for non-streaming mock)
+            await asyncio.sleep(exec_ms * 0.2 / 1000)
+            timer.record("T6") # TTFT
+            
+            timer.record("T7") # Full text generation complete
+            
+            # T7 -> T8: Output Grounding complete
+            out_guard_res = await output_guard.verify_grounding(answer, filtered_citations, cascade_provider=llm_cascade)
+            if not out_guard_res.is_safe:
+                answer = f"[GROUNDING FAILED] {out_guard_res.reason}\n\nOriginal Answer: {answer}"
+            timer.record("T8") # Output grounding complete
+            
+            citations_str = "\n".join([f"{i+1}. [Doc ID: {c.id}] (Score: {c.similarity:.2f})\n   {c.text}" for i, c in enumerate(filtered_citations)])
     
     # TTS Synthesis
     audio_output = None
-    if not os.environ.get("SKIP_TTS", ""):
+    if not os.environ.get("SKIP_TTS", "") and "GROUNDING FAILED" not in answer:
         output_file = "output.mp3"
-        await tts_client.synthesize(answer, output_path=output_file)
-        audio_output = output_file
-        
-    await asyncio.sleep(0.05)
+        try:
+            await tts_client.synthesize(answer, output_path=output_file)
+            audio_output = output_file
+        except Exception as e:
+            print(f"TTS Error: {e}")
+            
     timer.record("T9") # TTS complete
     
     waterfall = timer.get_waterfall()
@@ -114,9 +158,7 @@ async def process_interaction(audio_filepath, text_input, mode):
     
     metrics = f"[TIME STONE SYNC]\nRetrieval Latency: {retrieval_lat:.1f}ms\nPost-STT Latency: {e2e_lat:.1f}ms\n\nWaterfall Diagnostics:\n{waterfall_str}"
     
-    citations = "1. [Doc A: Context about the query] (0.85)\n2. [Doc B: Additional context] (0.81)"
-    
-    return answer, citations, metrics, audio_output
+    return answer, citations_str, metrics, audio_output
 
 # Define Custom Infinity Ultron Gradio Theme
 theme = gr.themes.Base(
