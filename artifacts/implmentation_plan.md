@@ -19,10 +19,10 @@ The architecture is strictly decoupled using modular contracts (`base.py`, Pydan
 │ • Setup .env & dependencies│ • Stream MSMARCO-XI (hi)   │ • Sarvam saaras:v3 STT client│
 │ • Sequential LLM Cascade:  │ • Create 50 dev / 100 test │ • ElevenLabs scribe_v2 STT   │
 │   Groq → Cerebras → Gemini │   deterministic splits     │ • edge-tts async client      │
-│ • LLM Harness & Retries    │ • Incremental Embedding:   │ • Sarvam bulbul:v3 TTS       │
-│ • Structured I/O (Pydantic)│   10k → 50k → 100k subsets │ • Gradio UI (app.py)         │
-│ • Two-Tier Grounding Check │ • Indexing Language Exp    │ • Stage Timer (T0 - T9)      │
-│ • Fast/Quality Retriever   │ • Qdrant 1024d collection  │ • Latency Waterfall UI       │
+│ • LLM Harness & Retries    │ • LOCAL Embedding (FREE):  │ • Sarvam bulbul:v3 TTS       │
+│ • Structured I/O (Pydantic)│   model2vec potion-128M    │ • Gradio UI (app.py)         │
+│ • Two-Tier Grounding Check │   256d, CPU, zero API cost │ • Stage Timer (T0 - T9)      │
+│ • Fast/Quality Retriever   │ • Qdrant 256d collection   │ • Latency Waterfall UI       │
 │   orchestration logic      │ • 5 Chunking experiments   │ • HF Spaces scaffolding     │
 ├────────────────────────────┴────────────────────────────┴──────────────────────────────┤
 │                               CONVERGENCE & INTEGRATION                                │
@@ -75,11 +75,14 @@ The architecture is strictly decoupled using modular contracts (`base.py`, Pydan
 
 ### 1.2 Incremental Dataset Size Experiment
 - [ ] **Objective**: Find the optimal index size balancing retrieval accuracy (Recall@5, NDCG@5) against storage and latency.
-- [ ] **Incremental Embedding Strategy (Zero Redundant API Calls)**:
-  1. Embed first 10,000 unique passages using Voyage AI `voyage-3` (1024d) → save to `data/embeddings/voyage_10k.npy`.
-  2. Embed next 40,000 unique passages → concatenate with 10k to create 50k corpus (`data/embeddings/voyage_50k.npy`).
-  3. Embed next 50,000 unique passages → concatenate to create 100k corpus (`data/embeddings/voyage_100k.npy`).
-- [ ] Benchmark each subset in isolated Qdrant test collections against the 50-query dev set.
+- [ ] **Local Embedding Strategy (100% Free, No Rate Limits)**:
+  > **Embedding Engine**: `minishlab/potion-multilingual-128M` via `model2vec` library  
+  > **Runs entirely on CPU/RAM** — no API keys, no quotas, no subscriptions  
+  > **Dimension**: 256d | **RAM**: ~300 MB | **Speed**: milliseconds per batch
+  1. Embed first 10,000 unique passages locally → save to `data/embeddings/model2vec_10k.npy`.
+  2. Embed next 40,000 unique passages → concatenate to create 50k corpus (`data/embeddings/model2vec_50k.npy`).
+  3. Embed next 50,000 unique passages → concatenate to create 100k corpus (`data/embeddings/model2vec_100k.npy`).
+- [ ] Benchmark each subset in isolated Qdrant test collections (256d) against the 50-query dev set.
 - [ ] Select the smallest corpus size meeting retrieval quality thresholds.
 
 ### 1.3 Indexing Language Experiment
@@ -95,14 +98,22 @@ The architecture is strictly decoupled using modular contracts (`base.py`, Pydan
 ## Phase 2: Production Embedding & Vector DB Setup (Member 2 — Data Lead)
 
 ### 2.1 Production Embedding Generation
-- [ ] Batch embed the selected production passage corpus using Voyage AI `voyage-3` (1024d, batch size: 128).
-- [ ] Persist all embeddings locally as `.npy` backups before uploading to vector storage.
-- [ ] (Optional) Embed passages with Gemini `gemini-embedding-001` (768d) ONLY if populating a separate `ultron_passages_gemini_768` collection for emergency embedding failover.
+> **⚠️ Approach Updated**: Switched from Voyage AI (rate-limited / paid) to fully local `model2vec` — zero API cost, no quotas.
+
+- [ ] Install embedding dependency: `pip install model2vec`.
+- [ ] Load model once at startup:
+  ```python
+  from model2vec import StaticModel
+  model = StaticModel.from_pretrained("minishlab/potion-multilingual-128M")  # 256d
+  ```
+- [ ] Batch embed the selected production passage corpus locally (CPU, batch size: 1024 — no API limit concerns).
+- [ ] Persist all embeddings locally as `.npy` backups before uploading to vector storage: `data/embeddings/model2vec_production.npy`.
+- [ ] (Optional Cloud Fallback) Gemini `gemini-embedding-001` (768d) ONLY if model2vec quality is insufficient — requires separate 768d Qdrant collection.
 
 ### 2.2 Vector Database Setup (Strict Dimensional Isolation)
-- [ ] Provision Qdrant Cloud collection: `ultron_passages_voyage_1024` (1024d, Cosine distance, int8 Scalar Quantization).
+- [ ] Provision Qdrant Cloud collection: `ultron_passages_model2vec_256` (**256d**, Cosine distance, int8 Scalar Quantization).
 - [ ] Batch upload vectors and full payload metadata (`chunk_id`, `text`, `english_text`, `translated_text`, `query_id`, `query_type`, `is_selected`).
-- [ ] Configure Pinecone Serverless (1024d, Cosine) as secondary hot backup.
+- [ ] Configure Pinecone Serverless (**256d**, Cosine) as secondary hot backup.
 - [ ] Set up a lightweight keep-alive ping script to prevent Qdrant 7-day inactivity pause.
 
 ### 2.3 Chunking Strategy Benchmark & Single Production Strategy Selection
@@ -260,8 +271,9 @@ rag-pipeline/
 │   │   └── base.py
 │   ├── embeddings/
 │   │   ├── __init__.py
-│   │   ├── voyage_client.py
-│   │   ├── gemini_client.py
+│   │   ├── model2vec_client.py  ← PRIMARY (local, free)
+│   │   ├── gemini_client.py     ← cloud fallback
+│   │   ├── voyage_client.py     ← deprecated (rate limits)
 │   │   └── base.py
 │   ├── retrieval/
 │   │   ├── __init__.py
